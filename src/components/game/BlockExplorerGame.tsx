@@ -7,7 +7,7 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { Button } from '@/components/ui/button';
-import { Play, HelpCircle } from 'lucide-react';
+import { Play, HelpCircle, AlertCircle } from 'lucide-react'; // Added AlertCircle
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 
@@ -35,6 +35,7 @@ export function BlockExplorerGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isPaused, setIsPaused] = useState(true);
   const [showHelp, setShowHelp] = useState(true);
+  const [pointerLockError, setPointerLockError] = useState<string | null>(null); // New state for pointer lock errors
 
   const isPausedRef = useRef(isPaused);
   useEffect(() => {
@@ -93,7 +94,6 @@ export function BlockExplorerGame() {
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 0.5;
     sunLight.shadow.camera.far = 500;
-    // ... (rest of shadow camera setup)
     scene.add(sunLight);
     scene.add(sunLight.target);
 
@@ -101,14 +101,13 @@ export function BlockExplorerGame() {
     const sky = new Sky();
     sky.scale.setScalar(450000);
     scene.add(sky);
-    skyRef.current = sky; // Store sky in ref for cleanup
+    skyRef.current = sky; 
     const skyUniforms = sky.material.uniforms;
     skyUniforms['turbidity'].value = 10;
     skyUniforms['rayleigh'].value = 2;
     skyUniforms['mieCoefficient'].value = 0.005;
     skyUniforms['mieDirectionalG'].value = 0.8;
     const sunPosition = new THREE.Vector3();
-    // ... (sun position calculation) ...
     const inclination = 0.3; 
     const azimuth = 0.25; 
     const theta = Math.PI * (inclination - 0.5);
@@ -147,7 +146,6 @@ export function BlockExplorerGame() {
       }
     }
     
-    // Tree Generation (simplified for brevity, assuming original logic is sound)
     const treeCount = Math.floor(TERRAIN_WIDTH * TERRAIN_DEPTH * 0.02);
     for (let i = 0; i < treeCount; i++) {
       const treeX = Math.floor(Math.random() * TERRAIN_WIDTH);
@@ -193,9 +191,8 @@ export function BlockExplorerGame() {
     if (terrainData.current[initialPlayerXBlock] && terrainData.current[initialPlayerXBlock][initialPlayerZBlock]) {
         camera.position.y = terrainData.current[initialPlayerXBlock][initialPlayerZBlock] + PLAYER_HEIGHT;
     } else {
-        camera.position.y = BLOCK_SIZE * 10 + PLAYER_HEIGHT; // Fallback if terrain data not found
+        camera.position.y = BLOCK_SIZE * 10 + PLAYER_HEIGHT; 
     }
-
 
     // Controls
     const controls = new PointerLockControls(camera, renderer.domElement);
@@ -222,7 +219,11 @@ export function BlockExplorerGame() {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
-    controls.addEventListener('lock', () => { setIsPaused(false); setShowHelp(false); });
+    controls.addEventListener('lock', () => { 
+      setIsPaused(false); 
+      setShowHelp(false); 
+      setPointerLockError(null); // Clear error on successful lock
+    });
     controls.addEventListener('unlock', () => setIsPaused(true));
 
     // Resize handler
@@ -242,7 +243,7 @@ export function BlockExplorerGame() {
       animationFrameId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      if (controlsRef.current && !isPausedRef.current && cameraRef.current) { // Check cameraRef.current
+      if (controlsRef.current && !isPausedRef.current && cameraRef.current) { 
         const cam = controlsRef.current.getObject();
         
         playerVelocity.current.y += GRAVITY * delta;
@@ -267,15 +268,14 @@ export function BlockExplorerGame() {
           onGround.current = false;
         }
 
-        const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.7) * delta; // Slower air control
+        const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.7) * delta; 
         const direction = new THREE.Vector3();
         const forwardVector = new THREE.Vector3();
         cam.getWorldDirection(forwardVector);
-        forwardVector.y=0; // Project to XZ plane
+        forwardVector.y=0; 
         forwardVector.normalize();
 
         const rightVector = new THREE.Vector3().crossVectors(cam.up, forwardVector).normalize().negate();
-
 
         if (moveForward.current) direction.add(forwardVector);
         if (moveBackward.current) direction.sub(forwardVector);
@@ -308,8 +308,8 @@ export function BlockExplorerGame() {
                             const currentBlockWorldZ = (blockZ - TERRAIN_DEPTH / 2) * BLOCK_SIZE;
                             
                             const playerBB = new THREE.Box3(
-                                new THREE.Vector3(cam.position.x - 0.3, playerFeetYLevel + 0.1, cam.position.z - 0.3), // Added 0.1 to feet to avoid snagging on floor
-                                new THREE.Vector3(cam.position.x + 0.3, playerHeadYLevel - 0.1, cam.position.z + 0.3) // Subtracted 0.1 from head to avoid snagging on ceiling
+                                new THREE.Vector3(cam.position.x - 0.3, playerFeetYLevel + 0.1, cam.position.z - 0.3),
+                                new THREE.Vector3(cam.position.x + 0.3, playerHeadYLevel - 0.1, cam.position.z + 0.3) 
                             );
                             const blockBB = new THREE.Box3(
                                 new THREE.Vector3(currentBlockWorldX - BLOCK_SIZE/2, blockBottomY, currentBlockWorldZ - BLOCK_SIZE/2),
@@ -319,9 +319,6 @@ export function BlockExplorerGame() {
                             if (playerBB.intersectsBox(blockBB)) { 
                                 cam.position.x = oldPosition.x;
                                 cam.position.z = oldPosition.z;
-                                // A more sophisticated response would be to slide along the wall
-                                // by projecting the movement vector away from the collision normal.
-                                // For now, just stop.
                                 return true; 
                             }
                         }
@@ -329,7 +326,7 @@ export function BlockExplorerGame() {
                 }
                 return false; 
             };
-            checkCollisionAtY(0.5 * BLOCK_SIZE); // Check around player's mid-height
+            checkCollisionAtY(0.5 * BLOCK_SIZE);
         }
       }
 
@@ -369,13 +366,26 @@ export function BlockExplorerGame() {
   }, []); 
 
   const startGame = () => {
+    setPointerLockError(null); // Clear previous errors
     if (controlsRef.current && rendererRef.current?.domElement) {
-      // Ensure the canvas can receive focus then attempt to focus it.
-      // tabindex='-1' allows programmatic focus without adding to tab order.
       rendererRef.current.domElement.setAttribute('tabindex', '-1');
       rendererRef.current.domElement.focus();
       
-      controlsRef.current.lock();
+      try {
+        controlsRef.current.lock();
+        // If lock() succeeds, the 'lock' event will fire, 
+        // which then calls setIsPaused(false) and setPointerLockError(null).
+      } catch (e: any) {
+        console.error("Pointer lock request failed:", e);
+        let friendlyMessage = "Could not lock mouse pointer. This is needed for looking around.\n";
+        friendlyMessage += "- Try opening the game in a new, standalone browser tab.\n";
+        friendlyMessage += "- Ensure your browser settings allow pointer lock for this site.\n";
+        if (e.message && e.message.includes("sandboxed") && e.message.includes("allow-pointer-lock")) {
+          friendlyMessage += "- If you're in a sandboxed environment (like an embedded demo), it might lack the necessary 'allow-pointer-lock' permission.";
+        }
+        setPointerLockError(friendlyMessage);
+        setIsPaused(true); // Ensure pause screen with error is shown
+      }
     } else {
       console.warn('BlockExplorerGame: Could not start game, controls or renderer domElement not ready.');
     }
@@ -384,30 +394,48 @@ export function BlockExplorerGame() {
   return (
     <div ref={mountRef} className="h-full w-full relative">
       {isPaused && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-10">
-          <h1 className="text-5xl font-bold text-primary mb-4">Block Explorer</h1>
-          <Button onClick={startGame} size="lg" className="mb-4">
-            <Play className="mr-2 h-5 w-5" /> Start Exploring
-          </Button>
-          {showHelp && (
-             <Card className="w-full max-w-md bg-card/80 shadow-xl">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-10 p-4">
+          {pointerLockError ? (
+            <Card className="w-full max-w-lg bg-card/90 shadow-xl">
               <CardHeader>
-                <CardTitle className="flex items-center text-card-foreground">
-                  <HelpCircle className="mr-2 h-6 w-6 text-accent" /> How to Play
+                <CardTitle className="flex items-center text-destructive">
+                  <AlertCircle className="mr-2 h-6 w-6" /> Pointer Lock Issue
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-card-foreground/90">
-                <ul className="list-disc list-inside space-y-1">
-                  <li><strong>Move:</strong> WASD or Arrow Keys</li>
-                  <li><strong>Look:</strong> Mouse</li>
-                  <li><strong>Jump:</strong> Spacebar</li>
-                  <li><strong>Pause/Unpause:</strong> ESC key</li>
-                </ul>
-                <p className="mt-3 text-sm">Click "Start Exploring" to lock mouse pointer and begin.</p>
+              <CardContent>
+                <p className="text-destructive-foreground/90 mb-4 whitespace-pre-line">{pointerLockError}</p>
+                <Button onClick={startGame} size="lg" className="w-full">
+                  <Play className="mr-2 h-5 w-5" /> Try Again
+                </Button>
               </CardContent>
             </Card>
+          ) : (
+            <>
+              <h1 className="text-5xl font-bold text-primary mb-4">Block Explorer</h1>
+              <Button onClick={startGame} size="lg" className="mb-4">
+                <Play className="mr-2 h-5 w-5" /> Start Exploring
+              </Button>
+              {showHelp && (
+                 <Card className="w-full max-w-md bg-card/80 shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="flex items-center text-card-foreground">
+                      <HelpCircle className="mr-2 h-6 w-6 text-accent" /> How to Play
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-card-foreground/90">
+                    <ul className="list-disc list-inside space-y-1">
+                      <li><strong>Move:</strong> WASD or Arrow Keys</li>
+                      <li><strong>Look:</strong> Mouse</li>
+                      <li><strong>Jump:</strong> Spacebar</li>
+                      <li><strong>Pause/Unpause:</strong> ESC key</li>
+                    </ul>
+                    <p className="mt-3 text-sm">Click "Start Exploring" to lock mouse pointer and begin.</p>
+                  </CardContent>
+                </Card>
+              )}
+              {!showHelp && <p className="text-muted-foreground">Game Paused. Press ESC to resume control if needed, or click "Start Exploring".</p>}
+            </>
           )}
-           {!showHelp && <p className="text-muted-foreground">Game Paused. Press ESC to resume control if needed, or click "Start Exploring".</p>}
         </div>
       )}
     </div>
@@ -415,5 +443,3 @@ export function BlockExplorerGame() {
 }
 
 export default BlockExplorerGame;
-
-    

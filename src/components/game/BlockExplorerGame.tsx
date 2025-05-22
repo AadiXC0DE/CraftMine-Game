@@ -279,64 +279,57 @@ export function BlockExplorerGame() {
 
         if (moveForward.current) direction.add(forwardVector);
         if (moveBackward.current) direction.sub(forwardVector);
-        if (moveLeft.current) direction.sub(rightVector); // Changed from moveRight
-        if (moveRight.current) direction.add(rightVector); // Changed from moveLeft
+        if (moveLeft.current) direction.sub(rightVector); 
+        if (moveRight.current) direction.add(rightVector); 
         
-        direction.normalize(); // Ensure consistent speed in all directions
+        direction.normalize(); 
 
-        if (direction.lengthSq() > 0) { // only move if there is input
+        if (direction.lengthSq() > 0) { 
             const oldPosition = cam.position.clone();
             cam.position.addScaledVector(direction, moveSpeed);
 
-            // Basic collision detection with terrain blocks after movement
-            // This is a simplified version and might need refinement for robustness
             const newPlayerXBlock = Math.floor(cam.position.x / BLOCK_SIZE + TERRAIN_WIDTH / 2);
             const newPlayerZBlock = Math.floor(cam.position.z / BLOCK_SIZE + TERRAIN_DEPTH / 2);
             
-            // Check collision with blocks at player's feet and head level
             const checkCollisionAtY = (yOffset: number) => {
-                const checkY = Math.floor((cam.position.y - PLAYER_HEIGHT + yOffset) / BLOCK_SIZE);
-                // Check current block and neighbors for simplicity
+                const playerFeetYLevel = cam.position.y - PLAYER_HEIGHT;
+                const playerHeadYLevel = cam.position.y;
+
                 for (let dx = -1; dx <= 1; dx++) {
                     for (let dz = -1; dz <= 1; dz++) {
                         const blockX = newPlayerXBlock + dx;
                         const blockZ = newPlayerZBlock + dz;
                         if (blockX >= 0 && blockX < TERRAIN_WIDTH && blockZ >= 0 && blockZ < TERRAIN_DEPTH) {
                             const blockHeightInUnits = terrainData.current[blockX][blockZ];
-                            const blockTopY = blockHeightInUnits;
-                            const blockBottomY = blockHeightInUnits - BLOCK_SIZE;
+                            const blockTopY = blockHeightInUnits; 
+                            const blockBottomY = blockHeightInUnits - BLOCK_SIZE; 
 
-                            const playerHeadY = cam.position.y;
-                            const playerFeetY = cam.position.y - PLAYER_HEIGHT;
-
-                            // AABB collision check for player against this block column
-                            // This needs more robust AABB intersection logic.
-                            // For now, if player new pos is inside a block, revert XZ.
                             const currentBlockWorldX = (blockX - TERRAIN_WIDTH / 2) * BLOCK_SIZE;
                             const currentBlockWorldZ = (blockZ - TERRAIN_DEPTH / 2) * BLOCK_SIZE;
                             
                             const playerBB = new THREE.Box3(
-                                new THREE.Vector3(cam.position.x - 0.3, playerFeetY, cam.position.z - 0.3),
-                                new THREE.Vector3(cam.position.x + 0.3, playerHeadY, cam.position.z + 0.3)
+                                new THREE.Vector3(cam.position.x - 0.3, playerFeetYLevel + 0.1, cam.position.z - 0.3), // Added 0.1 to feet to avoid snagging on floor
+                                new THREE.Vector3(cam.position.x + 0.3, playerHeadYLevel - 0.1, cam.position.z + 0.3) // Subtracted 0.1 from head to avoid snagging on ceiling
                             );
                             const blockBB = new THREE.Box3(
                                 new THREE.Vector3(currentBlockWorldX - BLOCK_SIZE/2, blockBottomY, currentBlockWorldZ - BLOCK_SIZE/2),
                                 new THREE.Vector3(currentBlockWorldX + BLOCK_SIZE/2, blockTopY, currentBlockWorldZ + BLOCK_SIZE/2)
                             );
 
-                            if (playerBB.intersectsBox(blockBB) && blockTopY > playerFeetY + 0.1) { // if intersects and not just standing on top
-                                // Crude collision response: revert XZ movement
+                            if (playerBB.intersectsBox(blockBB)) { 
                                 cam.position.x = oldPosition.x;
                                 cam.position.z = oldPosition.z;
-                                // Could also try to slide along the wall
-                                return; // Stop checking after one collision
+                                // A more sophisticated response would be to slide along the wall
+                                // by projecting the movement vector away from the collision normal.
+                                // For now, just stop.
+                                return true; 
                             }
                         }
                     }
                 }
+                return false; 
             };
             checkCollisionAtY(0.5 * BLOCK_SIZE); // Check around player's mid-height
-            checkCollisionAtY(PLAYER_HEIGHT - 0.1); // Check around player's head
         }
       }
 
@@ -352,7 +345,7 @@ export function BlockExplorerGame() {
       document.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', handleResize);
       
-      controlsRef.current?.disconnect(); // Disconnect pointer lock controls listeners
+      controlsRef.current?.disconnect(); 
 
       if (currentMount && rendererRef.current?.domElement) {
         currentMount.removeChild(rendererRef.current.domElement);
@@ -361,29 +354,31 @@ export function BlockExplorerGame() {
       
       skyRef.current?.material.dispose();
 
-      Object.values(materials).forEach(mat => {
-        // Check if material was used before disposing. Some might not be if no blocks of that type generated.
-        // This is a minor optimization; disposing unused materials is harmless.
-        if (mat.userData.used) mat.dispose();
-      });
-      blockGeometry.dispose(); // blockGeometry is shared, dispose once.
+      Object.values(materials).forEach(mat => mat.dispose());
+      blockGeometry.dispose();
 
       terrainObjectsRef.current.children.forEach(child => {
         if (child instanceof THREE.InstancedMesh) {
-          child.geometry.dispose(); // Geometry is shared (blockGeometry), already handled.
-          // Material is one of materials, already handled.
-          // No, instancedMesh might have its own material instance or specific material not in 'materials' if logic changes.
-          // However, current code uses materials from the 'materials' object.
+          // Geometry and materials are shared and disposed above/globally
         }
       });
-      terrainObjectsRef.current.clear(); // Remove all children
+      terrainObjectsRef.current.clear(); 
       
-      sceneRef.current?.clear(); // Clear scene children, good practice
+      sceneRef.current?.clear(); 
     };
-  }, []); // Empty dependency array ensures this runs only once on mount and cleans up on unmount
+  }, []); 
 
   const startGame = () => {
-    controlsRef.current?.lock();
+    if (controlsRef.current && rendererRef.current?.domElement) {
+      // Ensure the canvas can receive focus then attempt to focus it.
+      // tabindex='-1' allows programmatic focus without adding to tab order.
+      rendererRef.current.domElement.setAttribute('tabindex', '-1');
+      rendererRef.current.domElement.focus();
+      
+      controlsRef.current.lock();
+    } else {
+      console.warn('BlockExplorerGame: Could not start game, controls or renderer domElement not ready.');
+    }
   };
 
   return (

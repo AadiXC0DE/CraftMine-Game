@@ -166,14 +166,19 @@ export function BlockExplorerGame() {
       if (groundSurfaceY === undefined || groundSurfaceY <= -Infinity + BLOCK_SIZE / 2) continue;
 
       // Ensure the tree base is on a solid block top
-      if (groundSurfaceY > (BLOCK_SIZE / 2) - COLLISION_TOLERANCE) { 
+      // The base terrain level is the Y of the center of the block the tree sits on.
+      const baseTerrainLevel = groundSurfaceY - (BLOCK_SIZE / 2); 
+
+      if (baseTerrainLevel > -Infinity) { // Ensure there's actual ground
         const treeHeight = Math.floor(Math.random() * 4) + 3;
         
         const worldTreeRootX = (chunkX * CHUNK_WIDTH + treeLocalX) * BLOCK_SIZE;
         const worldTreeRootZ = (chunkZ * CHUNK_DEPTH + treeLocalZ) * BLOCK_SIZE;
 
-        // The first trunk block's center Y should be the ground surface Y + half block size
-        const firstTrunkBlockCenterY = groundSurfaceY + (BLOCK_SIZE / 2);
+        // The first trunk block's center Y should be the ground surface Y 
+        // (which is center of top block) + half block size
+        const firstTrunkBlockCenterY = baseTerrainLevel + BLOCK_SIZE / 2;
+
 
         for (let h = 0; h < treeHeight; h++) {
           const trunkBlockCenterY = firstTrunkBlockCenterY + (h * BLOCK_SIZE);
@@ -189,13 +194,7 @@ export function BlockExplorerGame() {
         for (let lyOffset = 0; lyOffset < canopyBlockCountY; lyOffset++) { 
           for (let lx = -canopyRadius; lx <= canopyRadius; lx++) {
             for (let lz = -canopyRadius; lz <= canopyRadius; lz++) {
-              // Skip leaf exactly at trunk top for lowest canopy layer (or if it would replace the trunk)
-              if (lx === 0 && lz === 0 && lyOffset === 0 && canopyBaseCenterY + lyOffset * BLOCK_SIZE <= topTrunkBlockCenterY + BLOCK_SIZE / 2) continue; 
-              
-              // Make canopy roughly spherical/bushy
-              if (Math.sqrt(lx*lx + lz*lz) > canopyRadius + 0.1 && lyOffset < canopyBlockCountY -1) { 
-                  continue;
-              }
+              if (Math.sqrt(lx*lx + lz*lz) > canopyRadius + 0.2) continue; // Make canopy more circular/bushy
 
               const leafBlockCenterY = canopyBaseCenterY + lyOffset * BLOCK_SIZE;
               blockInstances.leaves.push(new THREE.Matrix4().setPosition(worldTreeRootX + lx * BLOCK_SIZE, leafBlockCenterY, worldTreeRootZ + lz * BLOCK_SIZE));
@@ -514,8 +513,8 @@ export function BlockExplorerGame() {
 
         if (moveForward.current) moveDirection.add(cameraDirectionXZ);
         if (moveBackward.current) moveDirection.sub(cameraDirectionXZ);
-        if (moveLeft.current) moveDirection.add(rightVectorXZ); // Corrected from .sub
-        if (moveRight.current) moveDirection.sub(rightVectorXZ); // Corrected from .add
+        if (moveLeft.current) moveDirection.sub(rightVectorXZ); 
+        if (moveRight.current) moveDirection.add(rightVectorXZ);
         
         if (moveDirection.lengthSq() > 0) {
             moveDirection.normalize();
@@ -774,3 +773,4 @@ export default BlockExplorerGame;
     
 
       
+

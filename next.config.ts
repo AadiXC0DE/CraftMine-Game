@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  transpilePackages: ['three/examples/jsm'],
 };
 
 export default nextConfig;

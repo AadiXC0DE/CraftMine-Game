@@ -66,6 +66,56 @@ function createWoodTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+// Function to create a procedural leaf texture
+function createLeafTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const context = canvas.getContext('2d')!;
+
+  const baseLeafColor = '#2E8B57'; // SeaGreen, a bit darker and less saturated
+  const darkerLeafColor = '#228B22'; // ForestGreen
+  const highlightLeafColor = '#3CB371'; // MediumSeaGreen
+
+  // Fill with base color
+  context.fillStyle = baseLeafColor;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw some splotches for leaf patterns
+  const numSplotches = 20;
+  for (let i = 0; i < numSplotches; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const radius = Math.random() * 3 + 2; // splotch radius
+
+    // Alternate between darker and highlight splotches
+    context.fillStyle = i % 2 === 0 ? darkerLeafColor : highlightLeafColor;
+    
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2, true);
+    context.fill();
+  }
+  
+  // Add a few very small, brighter highlights
+  const numHighlights = 5;
+   for (let i = 0; i < numHighlights; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const radius = Math.random() * 1 + 0.5;
+    context.fillStyle = '#90EE90'; // LightGreen
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2, true);
+    context.fill();
+  }
+
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
+
 // Material definitions (cached at module level)
 const materials = {
   grass: new THREE.MeshStandardMaterial({ color: 0x70AD47, roughness: 0.8, metalness: 0.1 }),
@@ -76,7 +126,14 @@ const materials = {
     roughness: 0.8, 
     metalness: 0.1 
   }),
-  leaves: new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.7, metalness: 0.1, transparent: true, opacity: 0.9 }),
+  leaves: new THREE.MeshStandardMaterial({ 
+    map: createLeafTexture(),
+    color: 0xffffff, // Set to white so texture colors are not tinted
+    roughness: 0.7, 
+    metalness: 0.1, 
+    transparent: true, 
+    opacity: 0.9 
+  }),
 };
 const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
 
@@ -774,3 +831,6 @@ export default BlockExplorerGame;
 
       
 
+
+
+    

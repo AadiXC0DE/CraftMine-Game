@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { Button } from '@/components/ui/button';
-import { Play, HelpCircle, AlertCircle } from 'lucide-react';
+import { Play, HelpCircle, AlertCircle, Mouse } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 
@@ -36,6 +36,8 @@ export function BlockExplorerGame() {
   const [isPaused, setIsPaused] = useState(true);
   const [showHelp, setShowHelp] = useState(true);
   const [pointerLockError, setPointerLockError] = useState<string | null>(null);
+  const [isPointerLockUnavailable, setIsPointerLockUnavailable] = useState(false);
+
 
   const isPausedRef = useRef(isPaused);
   useEffect(() => {
@@ -59,22 +61,63 @@ export function BlockExplorerGame() {
   const canJump = useRef(false);
   const terrainData = useRef<number[][]>([]);
 
+  // Refs for fallback click-and-drag controls
+  const isUsingFallbackControlsRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const previousMousePositionRef = useRef({ x: 0, y: 0 });
+
+
+  // Fallback mouse control handlers
+  const handleCanvasMouseDown = useCallback((event: MouseEvent) => {
+    if (isPausedRef.current || !isUsingFallbackControlsRef.current || !rendererRef.current?.domElement) return;
+    // Ensure click is on canvas
+    if (event.target === rendererRef.current.domElement) {
+      isDraggingRef.current = true;
+      previousMousePositionRef.current = { x: event.clientX, y: event.clientY };
+      // Prevent default to avoid text selection, etc.
+      event.preventDefault();
+    }
+  }, []);
+
+  const handleDocumentMouseMove = useCallback((event: MouseEvent) => {
+    if (isPausedRef.current || !isDraggingRef.current || !isUsingFallbackControlsRef.current || !cameraRef.current) return;
+
+    const movementX = event.clientX - previousMousePositionRef.current.x;
+    const movementY = event.clientY - previousMousePositionRef.current.y;
+
+    const camera = cameraRef.current;
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    euler.setFromQuaternion(camera.quaternion);
+
+    euler.y -= movementX * 0.0025; // Sensitivity for yaw
+    euler.x -= movementY * 0.0025; // Sensitivity for pitch
+
+    const PI_2 = Math.PI / 2;
+    euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x)); // Clamp pitch
+
+    camera.quaternion.setFromEuler(euler);
+    previousMousePositionRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+  
+  const handleDocumentMouseUp = useCallback(() => {
+    if (!isUsingFallbackControlsRef.current) return;
+    isDraggingRef.current = false;
+  }, []);
+
+
   useEffect(() => {
     if (!mountRef.current) return;
 
     const currentMount = mountRef.current;
 
-    // Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xF0F4EC);
     sceneRef.current = scene;
 
-    // Camera
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.y = PLAYER_HEIGHT + BLOCK_SIZE * 10;
     cameraRef.current = camera;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
@@ -83,7 +126,6 @@ export function BlockExplorerGame() {
     currentMount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
     
-    // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
@@ -97,7 +139,6 @@ export function BlockExplorerGame() {
     scene.add(sunLight);
     scene.add(sunLight.target);
 
-    // Sky
     const sky = new Sky();
     sky.scale.setScalar(450000);
     scene.add(sky);
@@ -119,7 +160,6 @@ export function BlockExplorerGame() {
     sunLight.position.copy(sunPosition.multiplyScalar(100));
     sunLight.target.position.set(0,0,0);
 
-    // Terrain Generation
     const noise = new ImprovedNoise();
     const terrainWidthHalf = TERRAIN_WIDTH / 2;
     const terrainDepthHalf = TERRAIN_DEPTH / 2;
@@ -194,18 +234,33 @@ export function BlockExplorerGame() {
         camera.position.y = BLOCK_SIZE * 10 + PLAYER_HEIGHT; 
     }
 
-    // Controls
     const controls = new PointerLockControls(camera, renderer.domElement);
     controlsRef.current = controls;
     scene.add(controls.getObject());
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isPausedRef.current && event.code !== 'Escape') return;
+
       switch (event.code) {
         case 'ArrowUp': case 'KeyW': moveForward.current = true; break;
         case 'ArrowLeft': case 'KeyA': moveLeft.current = true; break;
         case 'ArrowDown': case 'KeyS': moveBackward.current = true; break;
         case 'ArrowRight': case 'KeyD': moveRight.current = true; break;
         case 'Space': if (canJump.current && onGround.current) playerVelocity.current.y = JUMP_VELOCITY; break;
+        case 'Escape':
+           if (!isPausedRef.current) {
+             if (controlsRef.current?.isLocked) {
+               // PointerLockControls will unlock and trigger its 'unlock' event
+             } else {
+               // If not using pointer lock (isLocked is false) or it failed, directly pause
+               setIsPaused(true);
+             }
+           } else if (isPausedRef.current && !pointerLockError && !isPointerLockUnavailable) {
+              // If paused without critical errors, ESC can resume via trying to lock pointer
+              // This might be redundant if "Start Exploring" button is primary way to resume
+              // For now, let startGame handle resume logic
+           }
+          break;
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -219,14 +274,34 @@ export function BlockExplorerGame() {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
-    controls.addEventListener('lock', () => { 
+    const onControlsLock = () => { 
       setIsPaused(false); 
       setShowHelp(false); 
-      setPointerLockError(null); // Clear error on successful lock
-    });
-    controls.addEventListener('unlock', () => setIsPaused(true));
+      setPointerLockError(null);
+      setIsPointerLockUnavailable(false);
+      isUsingFallbackControlsRef.current = false; // Pointer lock is active
+    };
+    const onControlsUnlock = () => {
+      setIsPaused(true);
+      // Don't show general help if a specific error or fallback is active
+      if (!pointerLockError && !isPointerLockUnavailable) {
+        setShowHelp(true);
+      }
+    };
+    controls.addEventListener('lock', onControlsLock);
+    controls.addEventListener('unlock', onControlsUnlock);
+    
+    // Add fallback control listeners if PointerLockControls are not active
+    // These will be added in startGame if needed
+    const currentRendererDom = rendererRef.current?.domElement;
+    if (currentRendererDom && isUsingFallbackControlsRef.current) {
+        currentRendererDom.addEventListener('mousedown', handleCanvasMouseDown);
+        document.addEventListener('mousemove', handleDocumentMouseMove);
+        document.addEventListener('mouseup', handleDocumentMouseUp);
+        document.addEventListener('mouseleave', handleDocumentMouseUp);
+    }
 
-    // Resize handler
+
     const handleResize = () => {
       if (cameraRef.current && rendererRef.current) {
         cameraRef.current.aspect = window.innerWidth / window.innerHeight;
@@ -236,7 +311,6 @@ export function BlockExplorerGame() {
     };
     window.addEventListener('resize', handleResize);
 
-    // Animation loop
     const clock = new THREE.Clock();
     let animationFrameId: number;
     const animate = () => {
@@ -271,14 +345,19 @@ export function BlockExplorerGame() {
         const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.7) * delta; 
         const direction = new THREE.Vector3();
         const forwardVector = new THREE.Vector3();
+        
+        // Get forward vector based on camera, Y component is handled by PointerLockControls or click-drag
         cam.getWorldDirection(forwardVector);
-        forwardVector.y=0; 
-        forwardVector.normalize();
+        // For WASD movement, we only care about XZ plane.
+        // If using PointerLockControls, it directly manipulates camera's quaternion/rotation.
+        // If using click-drag, our mousemove handler manipulates camera's quaternion/rotation.
+        const cameraDirectionForMovement = new THREE.Vector3(forwardVector.x, 0, forwardVector.z).normalize();
 
-        const rightVector = new THREE.Vector3().crossVectors(cam.up, forwardVector).normalize().negate();
 
-        if (moveForward.current) direction.add(forwardVector);
-        if (moveBackward.current) direction.sub(forwardVector);
+        const rightVector = new THREE.Vector3().crossVectors(scene.up, cameraDirectionForMovement).normalize();
+
+        if (moveForward.current) direction.add(cameraDirectionForMovement);
+        if (moveBackward.current) direction.sub(cameraDirectionForMovement);
         if (moveLeft.current) direction.sub(rightVector); 
         if (moveRight.current) direction.add(rightVector); 
         
@@ -342,6 +421,8 @@ export function BlockExplorerGame() {
       document.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', handleResize);
       
+      controlsRef.current?.removeEventListener('lock', onControlsLock);
+      controlsRef.current?.removeEventListener('unlock', onControlsUnlock);
       controlsRef.current?.disconnect(); 
 
       if (currentMount && rendererRef.current?.domElement) {
@@ -356,17 +437,33 @@ export function BlockExplorerGame() {
 
       terrainObjectsRef.current.children.forEach(child => {
         if (child instanceof THREE.InstancedMesh) {
-          // Geometry and materials are shared and disposed above/globally
+          // Geometry and materials are shared
         }
       });
       terrainObjectsRef.current.clear(); 
       
       sceneRef.current?.clear(); 
+
+      // Cleanup fallback listeners
+      rendererRef.current?.domElement.removeEventListener('mousedown', handleCanvasMouseDown);
+      document.removeEventListener('mousemove', handleDocumentMouseMove);
+      document.removeEventListener('mouseup', handleDocumentMouseUp);
+      document.removeEventListener('mouseleave', handleDocumentMouseUp);
     };
-  }, []); 
+  }, [handleCanvasMouseDown, handleDocumentMouseMove, handleDocumentMouseUp]); 
 
   const startGame = () => {
-    setPointerLockError(null); // Clear previous errors
+    setPointerLockError(null); 
+    setIsPointerLockUnavailable(false);
+    isUsingFallbackControlsRef.current = false;
+
+    // Remove any existing fallback listeners before trying to lock
+    rendererRef.current?.domElement.removeEventListener('mousedown', handleCanvasMouseDown);
+    document.removeEventListener('mousemove', handleDocumentMouseMove);
+    document.removeEventListener('mouseup', handleDocumentMouseUp);
+    document.removeEventListener('mouseleave', handleDocumentMouseUp);
+
+
     if (controlsRef.current && rendererRef.current?.domElement) {
       rendererRef.current.domElement.setAttribute('tabindex', '-1');
       rendererRef.current.domElement.focus();
@@ -374,35 +471,80 @@ export function BlockExplorerGame() {
       try {
         controlsRef.current.lock();
         // If lock() succeeds, the 'lock' event will fire, 
-        // which then calls setIsPaused(false) and setPointerLockError(null).
+        // which then calls setIsPaused(false), setPointerLockError(null), etc.
       } catch (e: any) {
         console.error("Pointer lock request failed. Original error:", e);
+        let friendlyMessage = "Error: Could not lock the mouse pointer for looking around.\n\n";
         
-        let friendlyMessage = "Error: Could not lock the mouse pointer.\nThis is essential for looking around in the game.\n\n";
-        friendlyMessage += "Common reasons and solutions:\n";
-        friendlyMessage += "- **Browser/iframe restrictions:** If the game is in an iframe (common in demos/editors), it might lack 'allow-pointer-lock' permission. Try opening the game in a new, standalone browser tab.\n";
-        friendlyMessage += "- **Browser settings:** Ensure your browser settings allow pointer lock for this site.\n";
-        friendlyMessage += "- **User interaction:** Pointer lock usually requires a direct user click to initiate.\n\n";
+        if (e && e.message && (e.message.includes("sandboxed") || e.message.includes("allow-pointer-lock") || e.name === 'NotSupportedError' || e.message.includes("Pointer Lock API is not available"))) {
+          friendlyMessage += "This often happens in restricted environments (like iframes without 'allow-pointer-lock' permission).\n\n";
+          friendlyMessage += "Switched to **Click & Drag** to look around.\n";
+          friendlyMessage += "Move: WASD, Jump: Space.\n\n";
+          friendlyMessage += "For the full experience (hidden cursor), try opening the game in a new browser tab if possible.";
+          
+          setPointerLockError(e.message); // Store technical error
+          setIsPointerLockUnavailable(true); // Signal fallback mode
+          isUsingFallbackControlsRef.current = true;
 
-        if (e && e.message) {
-            friendlyMessage += `Details from the error: "${e.message}"\n\n`;
+          // Add listeners for click-drag
+          rendererRef.current?.domElement.addEventListener('mousedown', handleCanvasMouseDown);
+          document.addEventListener('mousemove', handleDocumentMouseMove);
+          document.addEventListener('mouseup', handleDocumentMouseUp);
+          document.addEventListener('mouseleave', handleDocumentMouseUp); // Stop dragging if mouse leaves window
+
+          setIsPaused(false); // Start the game with click-drag controls
+          setShowHelp(false);
+        } else {
+          friendlyMessage += "Common reasons and solutions:\n";
+          friendlyMessage += "- **Browser/iframe restrictions:** If the game is in an iframe, it might lack permissions. Try opening the game in a new, standalone browser tab.\n";
+          friendlyMessage += "- **Browser settings:** Ensure your browser settings allow pointer lock for this site.\n";
+          friendlyMessage += `Details from the error: "${e.message || 'Unknown error'}"\n\n`;
+          friendlyMessage += "(A 'THREE.PointerLockControls: Unable to use Pointer Lock API.' message may also appear in the browser's developer console due to this issue.)";
+          setPointerLockError(friendlyMessage);
+          setIsPaused(true); // Ensure pause screen with error is shown
         }
-
-        friendlyMessage += "(A 'THREE.PointerLockControls: Unable to use Pointer Lock API.' message may also appear in the browser's developer console due to this issue.)";
-        
-        setPointerLockError(friendlyMessage);
-        setIsPaused(true); // Ensure pause screen with error is shown
       }
     } else {
       console.warn('BlockExplorerGame: Could not start game, controls or renderer domElement not ready.');
+      setPointerLockError("Game components are not ready. Please try reloading.");
+      setIsPaused(true);
     }
   };
+
+  const gameTitle = "Block Explorer";
+  const buttonText = isPaused && (!pointerLockError && !isPointerLockUnavailable) ? "Start Exploring" : "Resume Exploring";
 
   return (
     <div ref={mountRef} className="h-full w-full relative">
       {isPaused && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-10 p-4">
-          {pointerLockError ? (
+          {isPointerLockUnavailable ? (
+            <Card className="w-full max-w-lg bg-card/90 shadow-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center text-primary">
+                  <Mouse className="mr-2 h-6 w-6" /> Fallback Controls Active
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-card-foreground/90 mb-3">
+                  Mouse pointer lock is unavailable. You can use an alternative control scheme:
+                </p>
+                <ul className="list-disc list-inside space-y-1 mb-4 text-card-foreground/80">
+                  <li><strong>Look:</strong> Click and Drag Mouse on game screen</li>
+                  <li><strong>Move:</strong> WASD or Arrow Keys</li>
+                  <li><strong>Jump:</strong> Spacebar</li>
+                  <li><strong>Pause/Unpause:</strong> ESC key (or button below)</li>
+                </ul>
+                <p className="text-sm text-muted-foreground mb-3">
+                  For the best experience (hidden cursor, direct mouse look), try opening the game in a new browser tab.
+                </p>
+                 {pointerLockError && <p className="text-xs text-destructive/80 mt-2 mb-3">Details: {pointerLockError}</p>}
+                <Button onClick={startGame} size="lg" className="w-full">
+                  <Play className="mr-2 h-5 w-5" /> {buttonText}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : pointerLockError ? (
             <Card className="w-full max-w-lg bg-card/90 shadow-xl">
               <CardHeader>
                 <CardTitle className="flex items-center text-destructive">
@@ -418,9 +560,9 @@ export function BlockExplorerGame() {
             </Card>
           ) : (
             <>
-              <h1 className="text-5xl font-bold text-primary mb-4">Block Explorer</h1>
+              <h1 className="text-5xl font-bold text-primary mb-4">{gameTitle}</h1>
               <Button onClick={startGame} size="lg" className="mb-4">
-                <Play className="mr-2 h-5 w-5" /> Start Exploring
+                <Play className="mr-2 h-5 w-5" /> {buttonText}
               </Button>
               {showHelp && (
                  <Card className="w-full max-w-md bg-card/80 shadow-xl">
@@ -432,15 +574,15 @@ export function BlockExplorerGame() {
                   <CardContent className="text-card-foreground/90">
                     <ul className="list-disc list-inside space-y-1">
                       <li><strong>Move:</strong> WASD or Arrow Keys</li>
-                      <li><strong>Look:</strong> Mouse</li>
+                      <li><strong>Look:</strong> Mouse (after clicking start)</li>
                       <li><strong>Jump:</strong> Spacebar</li>
                       <li><strong>Pause/Unpause:</strong> ESC key</li>
                     </ul>
-                    <p className="mt-3 text-sm">Click "Start Exploring" to lock mouse pointer and begin.</p>
+                    <p className="mt-3 text-sm">Click "{buttonText}" to lock mouse pointer and begin.</p>
                   </CardContent>
                 </Card>
               )}
-              {!showHelp && <p className="text-muted-foreground">Game Paused. Press ESC to resume control if needed, or click "Start Exploring".</p>}
+              {!showHelp && <p className="text-muted-foreground">Game Paused. Press ESC or click "{buttonText}" to resume.</p>}
             </>
           )}
         </div>
@@ -450,4 +592,3 @@ export function BlockExplorerGame() {
 }
 
 export default BlockExplorerGame;
-

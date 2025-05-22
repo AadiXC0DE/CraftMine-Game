@@ -7,7 +7,7 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { Button } from '@/components/ui/button';
-import { Play, HelpCircle, AlertCircle } from 'lucide-react'; // Added AlertCircle
+import { Play, HelpCircle, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 
@@ -35,7 +35,7 @@ export function BlockExplorerGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isPaused, setIsPaused] = useState(true);
   const [showHelp, setShowHelp] = useState(true);
-  const [pointerLockError, setPointerLockError] = useState<string | null>(null); // New state for pointer lock errors
+  const [pointerLockError, setPointerLockError] = useState<string | null>(null);
 
   const isPausedRef = useRef(isPaused);
   useEffect(() => {
@@ -376,13 +376,20 @@ export function BlockExplorerGame() {
         // If lock() succeeds, the 'lock' event will fire, 
         // which then calls setIsPaused(false) and setPointerLockError(null).
       } catch (e: any) {
-        console.error("Pointer lock request failed:", e);
-        let friendlyMessage = "Could not lock mouse pointer. This is needed for looking around.\n";
-        friendlyMessage += "- Try opening the game in a new, standalone browser tab.\n";
-        friendlyMessage += "- Ensure your browser settings allow pointer lock for this site.\n";
-        if (e.message && e.message.includes("sandboxed") && e.message.includes("allow-pointer-lock")) {
-          friendlyMessage += "- If you're in a sandboxed environment (like an embedded demo), it might lack the necessary 'allow-pointer-lock' permission.";
+        console.error("Pointer lock request failed. Original error:", e);
+        
+        let friendlyMessage = "Error: Could not lock the mouse pointer.\nThis is essential for looking around in the game.\n\n";
+        friendlyMessage += "Common reasons and solutions:\n";
+        friendlyMessage += "- **Browser/iframe restrictions:** If the game is in an iframe (common in demos/editors), it might lack 'allow-pointer-lock' permission. Try opening the game in a new, standalone browser tab.\n";
+        friendlyMessage += "- **Browser settings:** Ensure your browser settings allow pointer lock for this site.\n";
+        friendlyMessage += "- **User interaction:** Pointer lock usually requires a direct user click to initiate.\n\n";
+
+        if (e && e.message) {
+            friendlyMessage += `Details from the error: "${e.message}"\n\n`;
         }
+
+        friendlyMessage += "(A 'THREE.PointerLockControls: Unable to use Pointer Lock API.' message may also appear in the browser's developer console due to this issue.)";
+        
         setPointerLockError(friendlyMessage);
         setIsPaused(true); // Ensure pause screen with error is shown
       }
@@ -443,3 +450,4 @@ export function BlockExplorerGame() {
 }
 
 export default BlockExplorerGame;
+

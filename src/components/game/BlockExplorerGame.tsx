@@ -190,7 +190,7 @@ export function BlockExplorerGame() {
         terrainLevel = Math.max(1, terrainLevel); 
 
         // Store the Y-coordinate of the top surface of the highest ground block in this column
-        chunkTerrainHeights[x][z] = (terrainLevel - 1) * BLOCK_SIZE + (BLOCK_SIZE / 2); 
+        chunkTerrainHeights[x][z] = (terrainLevel -1) * BLOCK_SIZE + (BLOCK_SIZE / 2); 
 
         const worldXPos = (chunkX * CHUNK_WIDTH + x) * BLOCK_SIZE;
         const worldZPos = (chunkZ * CHUNK_DEPTH + z) * BLOCK_SIZE;
@@ -532,7 +532,7 @@ export function BlockExplorerGame() {
     const onKeyUp = (event: KeyboardEvent) => {
       switch (event.code) {
         case 'ArrowUp': case 'KeyW': moveForward.current = false; break;
-        case 'ArrowLeft': case 'KeyA': moveLeft.current = true; break;
+        case 'ArrowLeft': case 'KeyA': moveLeft.current = false; break;
         case 'ArrowDown': case 'KeyS': moveBackward.current = false; break;
         case 'ArrowRight': case 'KeyD': moveRight.current = false; break;
       }

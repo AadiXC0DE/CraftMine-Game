@@ -222,7 +222,7 @@ export function BlockExplorerGame() {
         const worldZPos = (chunkZ * CHUNK_DEPTH + z) * BLOCK_SIZE;
 
         // Determine base terrain height in blocks
-        let primaryHills = noise.noise(globalNoiseX / 35, globalNoiseZ / 35, 0) * 7 + 7;
+        let primaryHills = noise.noise(globalNoiseX / 35, globalNoiseZ / 35, 0) * 7 + 7; // Base height +7 from -7 to 7 range
         let secondaryDetail = noise.noise(globalNoiseX / 12, globalNoiseZ / 12, 0.5) * 3;
 
         const mountainNoiseVal = noise.noise(globalNoiseX / 100, globalNoiseZ / 100, 1.0);
@@ -235,21 +235,24 @@ export function BlockExplorerGame() {
         baseTerrainHeightBlocks = Math.min(baseTerrainHeightBlocks, MAX_TERRAIN_HEIGHT_BLOCKS);
         baseTerrainHeightBlocks = Math.max(1, baseTerrainHeightBlocks); 
 
+        // chunkTerrainHeights stores the Y of the TOP SURFACE of the highest solid block.
         chunkTerrainHeights[x][z] = (baseTerrainHeightBlocks - 1) * BLOCK_SIZE + (BLOCK_SIZE / 2);
 
-        // Determine surface block type first for this (x,z) column
-        let surfaceBlockType: 'grass' | 'sand' = 'grass'; // Default to grass
-        const topSolidBlock_CenterY = (baseTerrainHeightBlocks - 1) * BLOCK_SIZE;
 
-        // Condition 1: Block is part of the submerged bed
-        if (topSolidBlock_CenterY <= WATER_LEVEL_Y_CENTER) {
+        // Determine surface block type for the (x,z) column
+        let surfaceBlockType: 'grass' | 'sand' = 'grass'; // Default to grass
+        const highestSolidBlockCenterY = (baseTerrainHeightBlocks - 1) * BLOCK_SIZE; // Y-coordinate of the CENTER of the topmost solid block
+
+        if (highestSolidBlockCenterY < WATER_LEVEL_Y_CENTER) { // Topmost solid block's center is below water center -> definitely sand
           surfaceBlockType = 'sand';
+        } else if (highestSolidBlockCenterY === WATER_LEVEL_Y_CENTER) { // Topmost solid block's center is AT water center (its top is at water surface)
+          if (Math.random() < 0.4) { // 40% chance for sand at water's edge
+             surfaceBlockType = 'sand';
+          } else {
+             surfaceBlockType = 'grass'; // Grass block whose top is at water surface
+          }
         }
-        // Condition 2: Block is the first dry layer adjacent to water (potential beach)
-        else if (topSolidBlock_CenterY === WATER_LEVEL_Y_CENTER + BLOCK_SIZE && Math.random() < 0.6) { // 60% chance for sand
-          surfaceBlockType = 'sand';
-        }
-        // Else: Block is higher up, default 'grass' is correct.
+        // else: (highestSolidBlockCenterY > WATER_LEVEL_Y_CENTER) -> surfaceBlockType remains 'grass'. No sand on fully dry land.
 
 
         // Place solid blocks (grass, sand, dirt)
@@ -263,9 +266,9 @@ export function BlockExplorerGame() {
             } else { // surfaceBlockType is 'grass'
               blockInstances.grass.push(matrix);
             }
-          } else { // Blocks underneath the surface
-            // If the determined surface block is sand, AND we are in the "grass layer depth" region below it, make these underlying blocks sand.
-            // Otherwise, they are dirt.
+          } else { // Blocks underneath the surface block
+            // If the determined surface block is sand, AND we are in the "grass layer depth" region below it,
+            // make these underlying blocks also sand. Otherwise, they are dirt.
             if (surfaceBlockType === 'sand' && yBlockIndex >= baseTerrainHeightBlocks - GRASS_LAYER_DEPTH) {
               blockInstances.sand.push(matrix);
             } else {
@@ -274,16 +277,10 @@ export function BlockExplorerGame() {
           }
         }
 
-        // Place water blocks if solid ground is below water surface
-        const solidGroundTopSurfaceY = chunkTerrainHeights[x][z]; 
-        const waterActualSurfaceY = WATER_LEVEL_Y_CENTER + BLOCK_SIZE / 2; 
-
-        if (solidGroundTopSurfaceY < waterActualSurfaceY) {
-          let currentWaterBlockCenterY = solidGroundTopSurfaceY + BLOCK_SIZE / 2; 
-          while (currentWaterBlockCenterY <= WATER_LEVEL_Y_CENTER) {
-            blockInstances.water.push(new THREE.Matrix4().setPosition(worldXPos, currentWaterBlockCenterY, worldZPos));
-            currentWaterBlockCenterY += BLOCK_SIZE;
-          }
+        // Place water blocks
+        // Water blocks are placed starting from one level above the highest solid block's CENTER, up to WATER_LEVEL_Y_CENTER
+        for (let yWaterCenter = highestSolidBlockCenterY + BLOCK_SIZE; yWaterCenter <= WATER_LEVEL_Y_CENTER; yWaterCenter += BLOCK_SIZE) {
+          blockInstances.water.push(new THREE.Matrix4().setPosition(worldXPos, yWaterCenter, worldZPos));
         }
       }
     }
@@ -294,15 +291,17 @@ export function BlockExplorerGame() {
       const treeLocalX = Math.floor(Math.random() * CHUNK_WIDTH);
       const treeLocalZ = Math.floor(Math.random() * CHUNK_DEPTH);
 
-      const groundSurfaceYForTree = chunkTerrainHeights[treeLocalX]?.[treeLocalZ];
+      const groundSurfaceYForTree = chunkTerrainHeights[treeLocalX]?.[treeLocalZ]; // This is the TOP SURFACE Y of the ground.
 
+      // Ensure tree doesn't spawn in water (water surface is WATER_LEVEL_Y_CENTER + BLOCK_SIZE/2)
       if (groundSurfaceYForTree === undefined || groundSurfaceYForTree <= WATER_LEVEL_Y_CENTER + BLOCK_SIZE / 2) {
         continue;
       }
       
+      // The center of the first trunk block should be half a block above the ground's top surface.
       const firstTrunkBlockCenterY = groundSurfaceYForTree + (BLOCK_SIZE / 2);
 
-      if (firstTrunkBlockCenterY - (BLOCK_SIZE / 2) > -Infinity) { 
+      if (firstTrunkBlockCenterY - (BLOCK_SIZE / 2) > -Infinity) { // Valid ground level check
         const treeHeight = Math.floor(Math.random() * 3) + 4; 
         const worldTreeRootX = (chunkX * CHUNK_WIDTH + treeLocalX) * BLOCK_SIZE;
         const worldTreeRootZ = (chunkZ * CHUNK_DEPTH + treeLocalZ) * BLOCK_SIZE;
@@ -325,7 +324,7 @@ export function BlockExplorerGame() {
               else if (lyOffset === 0 && (Math.abs(lx) === 2 || Math.abs(lz) === 2)) { 
                 if (Math.random() < 0.25) continue; 
               }
-              if (lyOffset === 0 && lx === 0 && lz === 0) continue;
+              if (lyOffset === 0 && lx === 0 && lz === 0) continue; // Avoid leaf at trunk center in bottom layer
 
               blockInstances.leaves.push(new THREE.Matrix4().setPosition(worldTreeRootX + lx * BLOCK_SIZE, currentLayerY, worldTreeRootZ + lz * BLOCK_SIZE));
             }
@@ -404,6 +403,7 @@ export function BlockExplorerGame() {
     localX = (localX % CHUNK_WIDTH + CHUNK_WIDTH) % CHUNK_WIDTH;
     localZ = (localZ % CHUNK_DEPTH + CHUNK_DEPTH) % CHUNK_DEPTH;
 
+    // chunkData.terrainHeights stores the Y of the TOP SURFACE of the highest solid block.
     const height = chunkData.terrainHeights[localX]?.[localZ];
     return height === undefined ? -Infinity : height; 
   }, []);
@@ -596,11 +596,11 @@ export function BlockExplorerGame() {
     camera.position.z = (Math.random() * CHUNK_DEPTH / 4 - CHUNK_DEPTH / 8) * BLOCK_SIZE;
 
     updateChunks(); 
-    const initialGroundY = getPlayerGroundHeight(camera.position.x, camera.position.z);
+    const initialGroundY = getPlayerGroundHeight(camera.position.x, camera.position.z); // This is TOP SURFACE Y
     if (initialGroundY > -Infinity) {
         camera.position.y = initialGroundY + PLAYER_HEIGHT - (BLOCK_SIZE / 2); 
     } else {
-        camera.position.y = PLAYER_HEIGHT + 20 * BLOCK_SIZE; 
+        camera.position.y = PLAYER_HEIGHT + 20 * BLOCK_SIZE; // Fallback spawn height
     }
 
 
@@ -695,10 +695,10 @@ export function BlockExplorerGame() {
         playerVelocity.current.y += GRAVITY * delta;
         cam.position.y += playerVelocity.current.y * delta;
 
-        const groundSurfaceY = getPlayerGroundHeight(cam.position.x, cam.position.z);
-        const playerFeetY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); 
+        const groundSurfaceY = getPlayerGroundHeight(cam.position.x, cam.position.z); // This is actual top surface Y
+        const playerFeetBottomY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); 
 
-        if (playerFeetY < groundSurfaceY + COLLISION_TOLERANCE) { 
+        if (playerFeetBottomY < groundSurfaceY + COLLISION_TOLERANCE) { 
           cam.position.y = groundSurfaceY + PLAYER_HEIGHT - (BLOCK_SIZE / 2); 
           playerVelocity.current.y = 0;
           onGround.current = true;
@@ -728,18 +728,21 @@ export function BlockExplorerGame() {
             const oldPosition = cam.position.clone();
             cam.position.addScaledVector(moveDirection, moveSpeed);
 
-            const currentPlayerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); 
-            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE; 
+            // Horizontal collision check
+            const playerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Player's feet bottom
+            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE; // Player's head top (approx)
+            
             const targetBlockWorldX = cam.position.x;
             const targetBlockWorldZ = cam.position.z;
 
-            const collisionColumnSurfaceY = getPlayerGroundHeight(targetBlockWorldX, targetBlockWorldZ); 
+            const collisionColumnSurfaceY = getPlayerGroundHeight(targetBlockWorldX, targetBlockWorldZ); // Top surface of ground at target
             const blockTopAbsY = collisionColumnSurfaceY; 
-            const blockBottomAbsY = collisionColumnSurfaceY - BLOCK_SIZE; 
+            const blockBottomAbsY = collisionColumnSurfaceY - BLOCK_SIZE; // Assuming ground block is 1 unit high under its surface
 
 
-            if (currentPlayerFeetAbsY < (blockTopAbsY - COLLISION_TOLERANCE) && 
-                playerHeadAbsY > (blockBottomAbsY + COLLISION_TOLERANCE)) {     
+            // Check if player is trying to move into a block that's at roughly their height
+            if (playerFeetAbsY < (blockTopAbsY - COLLISION_TOLERANCE) && // Player's feet are below the top of the potential obstacle
+                playerHeadAbsY > (blockBottomAbsY + COLLISION_TOLERANCE)) { // Player's head is above the bottom of the potential obstacle     
                         const playerMinX = cam.position.x - 0.3 * BLOCK_SIZE; 
                         const playerMaxX = cam.position.x + 0.3 * BLOCK_SIZE;
                         const playerMinZ = cam.position.z - 0.3 * BLOCK_SIZE; 
@@ -757,47 +760,36 @@ export function BlockExplorerGame() {
 
                             let hitX = false, hitZ = false;
 
-                            const tempPosCheck = cam.position.clone();
-                            tempPosCheck.x = oldPosition.x; 
-                            tempPosCheck.z = cam.position.z;  
-                            const feetAtZMove = tempPosCheck.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                            const headAtZMove = tempPosCheck.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                            const heightAtZMove = getPlayerGroundHeight(tempPosCheck.x, tempPosCheck.z);
-                            const zMoveBlockTop = heightAtZMove;
-                            const zMoveBlockBottom = heightAtZMove - BLOCK_SIZE;
-                            if (!(feetAtZMove < (zMoveBlockTop - COLLISION_TOLERANCE) && headAtZMove > (zMoveBlockBottom + COLLISION_TOLERANCE))) {
-                            } else {
-                               const heightAtXOnly = getPlayerGroundHeight(cam.position.x, oldPosition.z); 
-                               const feetAtXOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); 
-                               const headAtXOnly = oldPosition.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                               if(feetAtXOnly < (heightAtXOnly - COLLISION_TOLERANCE) && headAtXOnly > (heightAtXOnly - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                                   hitX = true; 
-                               }
+                            // Check collision if only moving along Z
+                            const tempPosCheckZ = oldPosition.clone();
+                            tempPosCheckZ.z = cam.position.z;  
+                            const feetAtZMove = tempPosCheckZ.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
+                            const headAtZMove = tempPosCheckZ.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
+                            const heightAtZMove = getPlayerGroundHeight(tempPosCheckZ.x, tempPosCheckZ.z);
+                            if (feetAtZMove < (heightAtZMove - COLLISION_TOLERANCE) && headAtZMove > (heightAtZMove - BLOCK_SIZE + COLLISION_TOLERANCE)) {
+                               hitZ = true; // Collision if moved only along Z
+                            }
+                            
+                            // Check collision if only moving along X
+                            const tempPosCheckX = oldPosition.clone();
+                            tempPosCheckX.x = cam.position.x;
+                            const feetAtXMove = tempPosCheckX.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
+                            const headAtXMove = tempPosCheckX.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
+                            const heightAtXMove = getPlayerGroundHeight(tempPosCheckX.x, tempPosCheckX.z);
+                             if (feetAtXMove < (heightAtXMove - COLLISION_TOLERANCE) && headAtXMove > (heightAtXMove - BLOCK_SIZE + COLLISION_TOLERANCE)) {
+                                hitX = true; // Collision if moved only along X
                             }
 
 
-                            tempPosCheck.x = cam.position.x;  
-                            tempPosCheck.z = oldPosition.z; 
-                            const feetAtXMove = tempPosCheck.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                            const headAtXMove = tempPosCheck.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                            const heightAtXMove = getPlayerGroundHeight(tempPosCheck.x, tempPosCheck.z);
-                            const xMoveBlockTop = heightAtXMove;
-                            const xMoveBlockBottom = heightAtXMove - BLOCK_SIZE;
-                            if (!(feetAtXMove < (xMoveBlockTop - COLLISION_TOLERANCE) && headAtXMove > (xMoveBlockBottom + COLLISION_TOLERANCE))) {
-                            } else {
-                               const heightAtZOnly = getPlayerGroundHeight(oldPosition.x, cam.position.z); 
-                               const feetAtZOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                               const headAtZOnly = oldPosition.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                               if(feetAtZOnly < (heightAtZOnly - COLLISION_TOLERANCE) && headAtZOnly > (heightAtZOnly - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                                hitZ = true; 
-                               }
-                            }
+                            if (hitX && !hitZ) { // Collision primarily on X-axis
+                                cam.position.x = oldPosition.x; 
+                            } else if (hitZ && !hitX) { // Collision primarily on Z-axis
+                                cam.position.z = oldPosition.z; 
+                            } else if (hitX && hitZ) { // Collision on both (e.g. corner)
+                                cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); 
+                            } 
 
-
-                            if (hitX && !hitZ) { cam.position.x = oldPosition.x; } 
-                            else if (hitZ && !hitX) { cam.position.z = oldPosition.z; } 
-                            else if (hitX && hitZ) { cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); } 
-
+                            // Final check to prevent clipping into ground after slide
                             const finalCollisionCheckHeight = getPlayerGroundHeight(cam.position.x, cam.position.z);
                             const finalPlayerFeet = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                             const finalPlayerHead = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
@@ -956,4 +948,6 @@ export function BlockExplorerGame() {
 }
 
 export default BlockExplorerGame;
+    
+
     

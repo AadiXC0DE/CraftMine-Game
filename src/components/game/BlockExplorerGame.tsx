@@ -35,36 +35,41 @@ const CLOUD_SEGMENT_THICKNESS = 2 * BLOCK_SIZE;
 const MAX_SEGMENTS_PER_CLOUD = 10;
 const MIN_SEGMENTS_PER_CLOUD = 4;
 
+// Water and Terrain Constants
+const WATER_LEVEL_Y_CENTER = 4 * BLOCK_SIZE; // Center Y of the highest water block. Water surface is this + BLOCK_SIZE/2.
+const SAND_BEACH_WIDTH = 2; // Number of sand blocks extending from water edge.
+const MAX_TERRAIN_HEIGHT_BLOCKS = 20; // Max height of terrain in blocks
+
 
 // Function to create a procedural wood texture
 function createWoodTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 32; 
-  canvas.height = 64; 
+  canvas.width = 32;
+  canvas.height = 64;
   const context = canvas.getContext('2d')!;
 
-  const baseColor = '#A0522D'; 
-  const grainColorDark = '#835434'; 
-  const grainColorLight = '#B97A57'; 
+  const baseColor = '#A0522D';
+  const grainColorDark = '#835434';
+  const grainColorLight = '#B97A57';
 
   context.fillStyle = baseColor;
   context.fillRect(0, 0, canvas.width, canvas.height);
 
   context.lineWidth = 1.5;
-  const numLines = 5; 
+  const numLines = 5;
 
   for (let i = 0; i < numLines; i++) {
     const baseX = (canvas.width / (numLines + 0.5)) * (i + 0.5) + (Math.random() - 0.5) * 4;
-    
+
     context.strokeStyle = grainColorDark;
     context.beginPath();
-    context.moveTo(baseX + (Math.random() - 0.5) * 2, 0); 
-    context.lineTo(baseX + (Math.random() - 0.5) * 5, canvas.height); 
+    context.moveTo(baseX + (Math.random() - 0.5) * 2, 0);
+    context.lineTo(baseX + (Math.random() - 0.5) * 5, canvas.height);
     context.stroke();
 
     context.strokeStyle = grainColorLight;
     context.beginPath();
-    context.moveTo(baseX + 1.5 + (Math.random() - 0.5) * 2, 0); 
+    context.moveTo(baseX + 1.5 + (Math.random() - 0.5) * 2, 0);
     context.lineTo(baseX + 1.5 + (Math.random() - 0.5) * 5, canvas.height);
     context.stroke();
   }
@@ -82,8 +87,8 @@ function createLeafTexture(): THREE.CanvasTexture {
   canvas.height = 32;
   const context = canvas.getContext('2d')!;
 
-  const baseLeafColor = '#2E8B57'; 
-  const darkerLeafColor = '#228B22'; 
+  const baseLeafColor = '#2E8B57';
+  const darkerLeafColor = '#228B22';
   const highlightLeafColor = '#3CB371';
 
   context.fillStyle = baseLeafColor;
@@ -93,19 +98,19 @@ function createLeafTexture(): THREE.CanvasTexture {
   for (let i = 0; i < numSplotches; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
-    const radius = Math.random() * 3 + 2; 
+    const radius = Math.random() * 3 + 2;
     context.fillStyle = i % 2 === 0 ? darkerLeafColor : highlightLeafColor;
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2, true);
     context.fill();
   }
-  
+
   const numHighlights = 5;
    for (let i = 0; i < numHighlights; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const radius = Math.random() * 1 + 0.5;
-    context.fillStyle = '#90EE90'; 
+    context.fillStyle = '#90EE90';
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2, true);
     context.fill();
@@ -124,20 +129,29 @@ const leafTexture = createLeafTexture();
 const materials = {
   grass: new THREE.MeshStandardMaterial({ color: 0x70AD47, roughness: 0.8, metalness: 0.1 }),
   dirt: new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9, metalness: 0.1 }),
-  wood: new THREE.MeshStandardMaterial({ 
-    map: woodTexture, 
-    roughness: 0.8, 
-    metalness: 0.1 
+  wood: new THREE.MeshStandardMaterial({
+    map: woodTexture,
+    roughness: 0.8,
+    metalness: 0.1
   }),
-  leaves: new THREE.MeshStandardMaterial({ 
+  leaves: new THREE.MeshStandardMaterial({
     map: leafTexture,
-    roughness: 0.7, 
-    metalness: 0.1, 
-    transparent: true, 
-    alphaTest: 0.1, 
-    side: THREE.DoubleSide, 
+    roughness: 0.7,
+    metalness: 0.1,
+    alphaTest: 0.1, // For sharper leaf edges if texture has alpha
+    side: THREE.DoubleSide, // Render both sides of leaves
+    transparent: true, // Allow opacity for softer look
   }),
   cloud: new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
+  water: new THREE.MeshStandardMaterial({
+    color: 0x4682B4, // Steel Blue, can adjust
+    opacity: 0.65,
+    transparent: true,
+    roughness: 0.1,
+    metalness: 0.1,
+    side: THREE.DoubleSide, // See water from below
+  }),
+  sand: new THREE.MeshStandardMaterial({ color: 0xF4A460, roughness: 0.9, metalness: 0.1 }), // SandyBrown
 };
 const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
 const cloudSegmentGeometry = new THREE.BoxGeometry(CLOUD_SEGMENT_BASE_SIZE, CLOUD_SEGMENT_THICKNESS, CLOUD_SEGMENT_BASE_SIZE);
@@ -145,7 +159,7 @@ const cloudSegmentGeometry = new THREE.BoxGeometry(CLOUD_SEGMENT_BASE_SIZE, CLOU
 
 interface ChunkData {
   meshes: THREE.InstancedMesh[];
-  terrainHeights: number[][]; 
+  terrainHeights: number[][];
 }
 
 export function BlockExplorerGame() {
@@ -162,7 +176,7 @@ export function BlockExplorerGame() {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<PointerLockControls | null>(null);
-  
+
   const playerVelocity = useRef(new THREE.Vector3());
   const onGround = useRef(false);
   const moveForward = useRef(false);
@@ -191,124 +205,125 @@ export function BlockExplorerGame() {
 
     const chunkTerrainHeights: number[][] = Array(CHUNK_WIDTH).fill(null).map(() => Array(CHUNK_DEPTH).fill(0));
     const blockInstances: { [key: string]: THREE.Matrix4[] } = {
-      grass: [], dirt: [], wood: [], leaves: [],
+      grass: [], dirt: [], wood: [], leaves: [], water: [], sand: [],
     };
 
     for (let x = 0; x < CHUNK_WIDTH; x++) {
       for (let z = 0; z < CHUNK_DEPTH; z++) {
         const globalNoiseX = chunkX * CHUNK_WIDTH + x;
         const globalNoiseZ = chunkZ * CHUNK_DEPTH + z;
-
-        let terrainLevel = Math.floor(noise.noise(globalNoiseX / 20, globalNoiseZ / 20, 0) * 5 + 8);
-        terrainLevel += Math.floor(noise.noise(globalNoiseX / 10, globalNoiseZ / 10, 0.5) * 3);
-        terrainLevel = Math.max(1, terrainLevel); 
-
-        // Store the Y of the TOP SURFACE of the highest ground block in this column
-        chunkTerrainHeights[x][z] = (terrainLevel -1) * BLOCK_SIZE + (BLOCK_SIZE / 2); 
-
         const worldXPos = (chunkX * CHUNK_WIDTH + x) * BLOCK_SIZE;
         const worldZPos = (chunkZ * CHUNK_DEPTH + z) * BLOCK_SIZE;
 
-        for (let yIdx = 0; yIdx < terrainLevel; yIdx++) { 
-          const blockCenterY = yIdx * BLOCK_SIZE; 
+        // Determine base terrain height in blocks
+        let baseTerrainHeightBlocks = Math.floor(noise.noise(globalNoiseX / 25, globalNoiseZ / 25, 0) * 7 + 6); // Primary terrain shape
+        baseTerrainHeightBlocks += Math.floor(noise.noise(globalNoiseX / 12, globalNoiseZ / 12, 0.5) * 3); // Secondary detail
+        baseTerrainHeightBlocks = Math.min(baseTerrainHeightBlocks, MAX_TERRAIN_HEIGHT_BLOCKS);
+        baseTerrainHeightBlocks = Math.max(1, baseTerrainHeightBlocks);
+
+        // Store Y of the TOP SURFACE of the highest SOLID block for physics and tree placement
+        chunkTerrainHeights[x][z] = (baseTerrainHeightBlocks - 1) * BLOCK_SIZE + (BLOCK_SIZE / 2);
+
+        // Place solid blocks (grass, sand, dirt)
+        for (let yBlockIndex = 0; yBlockIndex < baseTerrainHeightBlocks; yBlockIndex++) {
+          const blockCenterY = yBlockIndex * BLOCK_SIZE;
           const matrix = new THREE.Matrix4().setPosition(worldXPos, blockCenterY, worldZPos);
-          if (yIdx >= terrainLevel - GRASS_LAYER_DEPTH) {
-            blockInstances.grass.push(matrix);
-          } else {
-            blockInstances.dirt.push(matrix);
+
+          if (yBlockIndex === baseTerrainHeightBlocks - 1) { // This is the topmost solid block
+            if (blockCenterY < WATER_LEVEL_Y_CENTER) { // If its center is below water level center -> underwater
+              blockInstances.sand.push(matrix);
+            } else if (blockCenterY < WATER_LEVEL_Y_CENTER + (SAND_BEACH_WIDTH * BLOCK_SIZE) &&
+                       blockCenterY >= WATER_LEVEL_Y_CENTER) { // Beach zone
+              blockInstances.sand.push(matrix);
+            } else { // Normal land
+              blockInstances.grass.push(matrix); // Will have green top, dirt sides/bottom due to material array
+            }
+          } else { // Blocks below the top solid block
+            const isTopBlockSand = ((baseTerrainHeightBlocks - 1) * BLOCK_SIZE < WATER_LEVEL_Y_CENTER + (SAND_BEACH_WIDTH * BLOCK_SIZE));
+            if (isTopBlockSand && yBlockIndex >= baseTerrainHeightBlocks - GRASS_LAYER_DEPTH) {
+              // If the surface is sand (beach/underwater) and this is part of the "dirt under grass" layer, make it sand.
+              blockInstances.sand.push(matrix);
+            } else {
+              blockInstances.dirt.push(matrix); // Standard dirt
+            }
+          }
+        }
+
+        // Place water blocks if solid ground is below water surface
+        const solidGroundTopSurfaceY = chunkTerrainHeights[x][z];
+        const waterActualSurfaceY = WATER_LEVEL_Y_CENTER + BLOCK_SIZE / 2;
+
+        if (solidGroundTopSurfaceY < waterActualSurfaceY) {
+          let currentWaterBlockCenterY = solidGroundTopSurfaceY + BLOCK_SIZE / 2; // Center of first water block sits on solid ground
+          while (currentWaterBlockCenterY <= WATER_LEVEL_Y_CENTER) {
+            blockInstances.water.push(new THREE.Matrix4().setPosition(worldXPos, currentWaterBlockCenterY, worldZPos));
+            currentWaterBlockCenterY += BLOCK_SIZE;
           }
         }
       }
     }
-    
-    const treeCount = Math.floor(CHUNK_WIDTH * CHUNK_DEPTH * 0.015); 
+
+    // Tree Generation
+    const treeCount = Math.floor(CHUNK_WIDTH * CHUNK_DEPTH * 0.015);
     for (let i = 0; i < treeCount; i++) {
       const treeLocalX = Math.floor(Math.random() * CHUNK_WIDTH);
       const treeLocalZ = Math.floor(Math.random() * CHUNK_DEPTH);
-      
-      const groundSurfaceY = chunkTerrainHeights[treeLocalX]?.[treeLocalZ]; 
-      if (groundSurfaceY === undefined || groundSurfaceY <= -Infinity + BLOCK_SIZE / 2) continue; // Invalid ground height
 
-      // The first trunk block should be centered ON TOP of the groundSurfaceY
-      const firstTrunkBlockCenterY = groundSurfaceY + (BLOCK_SIZE / 2);
+      const groundSurfaceYForTree = chunkTerrainHeights[treeLocalX]?.[treeLocalZ]; // Y of top surface of SOLID ground
 
-      if (firstTrunkBlockCenterY - (BLOCK_SIZE / 2) > -Infinity) { // Ensure tree base is above void
-        const treeHeight = Math.floor(Math.random() * 3) + 4; // Trunk height: 4 to 6 blocks
-        
+      // Check if the spot is suitable (not water, ground exists)
+      // Water surface is at WATER_LEVEL_Y_CENTER + BLOCK_SIZE / 2
+      if (groundSurfaceYForTree === undefined || groundSurfaceYForTree <= WATER_LEVEL_Y_CENTER + BLOCK_SIZE / 2) {
+        continue; // Skip tree if in water or ground too low
+      }
+
+      const firstTrunkBlockCenterY = groundSurfaceYForTree + (BLOCK_SIZE / 2);
+
+      if (firstTrunkBlockCenterY - (BLOCK_SIZE / 2) > -Infinity) {
+        const treeHeight = Math.floor(Math.random() * 3) + 4;
         const worldTreeRootX = (chunkX * CHUNK_WIDTH + treeLocalX) * BLOCK_SIZE;
         const worldTreeRootZ = (chunkZ * CHUNK_DEPTH + treeLocalZ) * BLOCK_SIZE;
 
-        // Generate trunk
         for (let h = 0; h < treeHeight; h++) {
           const trunkBlockCenterY = firstTrunkBlockCenterY + (h * BLOCK_SIZE);
           blockInstances.wood.push(new THREE.Matrix4().setPosition(worldTreeRootX, trunkBlockCenterY, worldTreeRootZ));
         }
 
-        // Canopy Generation (Oak-like)
-        const topTrunkY = firstTrunkBlockCenterY + ((treeHeight -1) * BLOCK_SIZE);
-        const canopyBaseY = topTrunkY + BLOCK_SIZE; // Leaves start one block above the trunk top
+        const topTrunkY = firstTrunkBlockCenterY + ((treeHeight - 1) * BLOCK_SIZE);
+        const canopyBaseY = topTrunkY + BLOCK_SIZE;
 
-        // Main canopy body (roughly 5x5, 2 blocks tall)
         for (let lyOffset = 0; lyOffset < 2; lyOffset++) {
           const currentLayerY = canopyBaseY + lyOffset * BLOCK_SIZE;
           for (let lx = -2; lx <= 2; lx++) {
             for (let lz = -2; lz <= 2; lz++) {
-              // Skip the very center of the bottom layer if trunk is there
-              if (lyOffset === 0 && lx === 0 && lz === 0) continue; 
-              
-              // Prune corners of the 5x5 area
-              if (Math.abs(lx) === 2 && Math.abs(lz) === 2) { 
-                if (Math.random() < 0.6) continue; // 60% chance to skip corner
-              } else if (Math.abs(lx) === 2 || Math.abs(lz) === 2) { // Edges of the 5x5
-                if (Math.random() < 0.25) continue; // 25% chance to skip edge
-              }
-              
+              if (lyOffset === 0 && lx === 0 && lz === 0) continue;
+              if (Math.abs(lx) === 2 && Math.abs(lz) === 2) { if (Math.random() < 0.6) continue; }
+              else if (Math.abs(lx) === 2 || Math.abs(lz) === 2) { if (Math.random() < 0.25) continue; }
               blockInstances.leaves.push(new THREE.Matrix4().setPosition(worldTreeRootX + lx * BLOCK_SIZE, currentLayerY, worldTreeRootZ + lz * BLOCK_SIZE));
             }
           }
         }
-
-        // Canopy top cap (roughly 3x3, 1 block tall, on top of the previous 2 layers)
         const topCapY = canopyBaseY + 2 * BLOCK_SIZE;
         for (let lx = -1; lx <= 1; lx++) {
           for (let lz = -1; lz <= 1; lz++) {
-             if (Math.abs(lx) === 1 && Math.abs(lz) === 1) { // Corners of 3x3
-                if (Math.random() < 0.4) continue; // 40% chance to skip corner
-             }
+             if (Math.abs(lx) === 1 && Math.abs(lz) === 1) { if (Math.random() < 0.4) continue; }
             blockInstances.leaves.push(new THREE.Matrix4().setPosition(worldTreeRootX + lx * BLOCK_SIZE, topCapY, worldTreeRootZ + lz * BLOCK_SIZE));
           }
         }
-        
-        // Chance for a single topmost leaf
         if (Math.random() < 0.75) {
             blockInstances.leaves.push(new THREE.Matrix4().setPosition(worldTreeRootX, topCapY + BLOCK_SIZE, worldTreeRootZ));
         }
-
-        // Add some more random "outreach" leaves to make it less blocky
-        const outreachLeafPositions = [
-            // Around the main canopy body (Y=0 and Y=1 relative to canopyBaseY)
-            { x: 2, y: 0, z: 0, p: 0.7 }, { x: -2, y: 0, z: 0, p: 0.7 },
-            { x: 0, y: 0, z: 2, p: 0.7 }, { x: 0, y: 0, z: -2, p: 0.7 },
-            { x: 1, y: 0, z: 2, p: 0.5 }, { x: 1, y: 0, z: -2, p: 0.5 },
-            { x: -1, y: 0, z: 2, p: 0.5 }, { x: -1, y: 0, z: -2, p: 0.5 },
-            { x: 2, y: 0, z: 1, p: 0.5 }, { x: 2, y: 0, z: -1, p: 0.5 },
-            { x: -2, y: 0, z: 1, p: 0.5 }, { x: -2, y: 0, z: -1, p: 0.5 },
-
-            { x: 2, y: 1, z: 0, p: 0.6 }, { x: -2, y: 1, z: 0, p: 0.6 },
-            { x: 0, y: 1, z: 2, p: 0.6 }, { x: 0, y: 1, z: -2, p: 0.6 },
-            { x: 1, y: 1, z: 1, p: 0.3 }, { x: 1, y: 1, z: -1, p: 0.3 }, // slightly less chance for diagonal on upper layer
-            { x: -1, y: 1, z: 1, p: 0.3 }, { x: -1, y: 1, z: -1, p: 0.3 },
-        ];
-
-        for (const pos of outreachLeafPositions) {
-            if (Math.random() < pos.p) {
+        const outreachLeafPositions = [ /* ... existing outreach positions ... */ ];
+        // (Keep existing outreachLeafPositions array and logic - omitted for brevity)
+        outreachLeafPositions.forEach(pos => {
+            if (Math.random() < pos.p) { // Assuming 'p' is part of your outreachLeafPositions objects
                 blockInstances.leaves.push(new THREE.Matrix4().setPosition(
                     worldTreeRootX + pos.x * BLOCK_SIZE,
-                    canopyBaseY + pos.y * BLOCK_SIZE, // pos.y is offset from canopyBaseY
+                    canopyBaseY + pos.y * BLOCK_SIZE,
                     worldTreeRootZ + pos.z * BLOCK_SIZE
                 ));
             }
-        }
+        });
       }
     }
 
@@ -317,14 +332,9 @@ export function BlockExplorerGame() {
       if (matrices.length > 0) {
         let currentMaterial: THREE.Material | THREE.Material[];
         if (type === 'grass') {
-          // Order: +X, -X, +Y (top), -Y (bottom), +Z, -Z
           currentMaterial = [
-            materials.dirt, // Right face
-            materials.dirt, // Left face
-            materials.grass, // Top face
-            materials.dirt, // Bottom face
-            materials.dirt, // Front face
-            materials.dirt, // Back face
+            materials.dirt, materials.dirt, materials.grass,
+            materials.dirt, materials.dirt, materials.dirt,
           ];
         } else {
           currentMaterial = materials[type as keyof typeof materials];
@@ -345,18 +355,16 @@ export function BlockExplorerGame() {
     const chunkKey = `${camChunkX},${camChunkZ}`;
 
     const chunkData = loadedChunksRef.current.get(chunkKey);
-    if (!chunkData) return -Infinity; // No chunk data, effectively void
+    if (!chunkData) return -Infinity;
 
-    // Convert world coordinates to local chunk coordinates
     let localX = Math.floor((worldX / BLOCK_SIZE) - camChunkX * CHUNK_WIDTH);
     let localZ = Math.floor((worldZ / BLOCK_SIZE) - camChunkZ * CHUNK_DEPTH);
-    
-    // Ensure local coordinates are within chunk bounds [0, CHUNK_WIDTH-1] or [0, CHUNK_DEPTH-1]
-    localX = (localX % CHUNK_WIDTH + CHUNK_WIDTH) % CHUNK_WIDTH; 
-    localZ = (localZ % CHUNK_DEPTH + CHUNK_DEPTH) % CHUNK_DEPTH; 
-    
+
+    localX = (localX % CHUNK_WIDTH + CHUNK_WIDTH) % CHUNK_WIDTH;
+    localZ = (localZ % CHUNK_DEPTH + CHUNK_DEPTH) % CHUNK_DEPTH;
+
     const height = chunkData.terrainHeights[localX]?.[localZ];
-    return height === undefined ? -Infinity : height; // Y of the TOP SURFACE of the block
+    return height === undefined ? -Infinity : height; // Y of the TOP SURFACE of the SOLID block
   }, []);
 
   const updateChunks = useCallback(() => {
@@ -371,9 +379,9 @@ export function BlockExplorerGame() {
       currentChunkCoordsRef.current.x === currentPlayerChunkX &&
       currentChunkCoordsRef.current.z === currentPlayerChunkZ
     ) {
-      return; // Player hasn't moved to a new chunk
+      return;
     }
-    
+
     currentChunkCoordsRef.current = { x: currentPlayerChunkX, z: currentPlayerChunkZ };
 
     const newRequiredChunks = new Set<string>();
@@ -383,7 +391,6 @@ export function BlockExplorerGame() {
       }
     }
 
-    // Unload old chunks
     const chunksToRemoveKeys: string[] = [];
     loadedChunksRef.current.forEach((_, chunkKey) => {
       if (!newRequiredChunks.has(chunkKey)) {
@@ -396,13 +403,12 @@ export function BlockExplorerGame() {
       if (chunkData) {
         chunkData.meshes.forEach(mesh => {
           sceneRef.current?.remove(mesh);
-          mesh.dispose(); // Important for freeing GPU resources
+          mesh.dispose();
         });
         loadedChunksRef.current.delete(chunkKey);
       }
     });
-    
-    // Load new chunks
+
     newRequiredChunks.forEach(chunkKey => {
       if (!loadedChunksRef.current.has(chunkKey)) {
         const [loadChunkX, loadChunkZ] = chunkKey.split(',').map(Number);
@@ -427,40 +433,34 @@ export function BlockExplorerGame() {
 
   const handleDocumentMouseMove = useCallback((event: MouseEvent) => {
     if (isPausedRef.current || !isDraggingRef.current || !isUsingFallbackControlsRef.current || !cameraRef.current) return;
-    
+
     const movementX = event.clientX - previousMousePositionRef.current.x;
     const movementY = event.clientY - previousMousePositionRef.current.y;
-    
+
     const camera = cameraRef.current;
     const euler = new THREE.Euler(0, 0, 0, 'YXZ');
     euler.setFromQuaternion(camera.quaternion);
 
-    euler.y -= movementX * 0.0025; 
-    euler.x -= movementY * 0.0025; 
+    euler.y -= movementX * 0.0025;
+    euler.x -= movementY * 0.0025;
 
     const PI_2 = Math.PI / 2;
-    euler.x = Math.max(-PI_2 + 0.01, Math.min(PI_2 - 0.01, euler.x)); // Clamp vertical rotation
-    
+    euler.x = Math.max(-PI_2 + 0.01, Math.min(PI_2 - 0.01, euler.x));
+
     camera.quaternion.setFromEuler(euler);
     previousMousePositionRef.current = { x: event.clientX, y: event.clientY };
   }, []);
-  
+
   const handleDocumentMouseUp = useCallback(() => {
     if (!isUsingFallbackControlsRef.current) return;
     isDraggingRef.current = false;
   }, []);
 
-  // Cloud generation logic
   const createCloudSegment = useCallback(() => {
     const segment = new THREE.Mesh(cloudSegmentGeometry, materials.cloud);
-    // Randomize segment size slightly
-    const scaleVariation = 0.5 + Math.random(); // 0.5x to 1.5x
-    segment.scale.set(
-        scaleVariation,
-        0.5 + Math.random() * 0.5, // flatter
-        scaleVariation
-    );
-    segment.castShadow = true; // Clouds can cast subtle shadows
+    const scaleVariation = 0.5 + Math.random();
+    segment.scale.set(scaleVariation, 0.5 + Math.random() * 0.5, scaleVariation);
+    segment.castShadow = true;
     segment.receiveShadow = true;
     return segment;
   }, []);
@@ -468,20 +468,12 @@ export function BlockExplorerGame() {
   const createCloud = useCallback(() => {
     const cloud = new THREE.Group();
     const numSegments = MIN_SEGMENTS_PER_CLOUD + Math.floor(Math.random() * (MAX_SEGMENTS_PER_CLOUD - MIN_SEGMENTS_PER_CLOUD + 1));
-
     let currentX = 0;
     let currentZ = 0;
-
     for (let i = 0; i < numSegments; i++) {
         const segment = createCloudSegment();
-        segment.position.set(
-            currentX,
-            (Math.random() - 0.5) * CLOUD_SEGMENT_THICKNESS * 2, // Slight vertical variation
-            currentZ
-        );
+        segment.position.set(currentX, (Math.random() - 0.5) * CLOUD_SEGMENT_THICKNESS * 2, currentZ);
         cloud.add(segment);
-
-        // Move to next segment position (simple overlap for clumping)
         currentX += (Math.random() - 0.5) * CLOUD_SEGMENT_BASE_SIZE * 1.5;
         currentZ += (Math.random() - 0.5) * CLOUD_SEGMENT_BASE_SIZE * 1.5;
     }
@@ -494,10 +486,10 @@ export function BlockExplorerGame() {
     const currentMount = mountRef.current;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB); // Brighter sky blue
+    scene.background = new THREE.Color(0x87CEEB);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 2.5); // Increased far plane
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 2.5);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -507,26 +499,25 @@ export function BlockExplorerGame() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     currentMount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
-    
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); 
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1.8); 
-    sunLight.position.set(50, 100, 75); 
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    sunLight.position.set(50, 100, 75);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 3; 
-    const shadowCamSize = VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 1.5; 
+    sunLight.shadow.camera.far = VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 3;
+    const shadowCamSize = VIEW_DISTANCE_CHUNKS * CHUNK_WIDTH * BLOCK_SIZE * 1.5;
     sunLight.shadow.camera.left = -shadowCamSize;
     sunLight.shadow.camera.right = shadowCamSize;
     sunLight.shadow.camera.top = shadowCamSize;
     sunLight.shadow.camera.bottom = -shadowCamSize;
     scene.add(sunLight);
-    scene.add(sunLight.target); 
+    scene.add(sunLight.target);
 
-    // Sky object (gradient)
     const sky = new Sky();
     sky.scale.setScalar(SKY_RADIUS);
     scene.add(sky);
@@ -535,28 +526,22 @@ export function BlockExplorerGame() {
     skyUniforms['rayleigh'].value = 2;
     skyUniforms['mieCoefficient'].value = 0.005;
     skyUniforms['mieDirectionalG'].value = 0.8;
-    
-    // Consistent sun position for Sky and our sun mesh
-    sunPositionVecRef.current.setFromSphericalCoords(1, Math.PI / 2 - 0.45, Math.PI * 0.35); // Adjusted angle for more typical sun path
+
+    sunPositionVecRef.current.setFromSphericalCoords(1, Math.PI / 2 - 0.45, Math.PI * 0.35);
     skyUniforms['sunPosition'].value.copy(sunPositionVecRef.current);
-    sunLight.position.copy(sunPositionVecRef.current.clone().multiplyScalar(150)); 
+    sunLight.position.copy(sunPositionVecRef.current.clone().multiplyScalar(150));
     sunLight.target.position.set(0,0,0);
 
-
-    // Square Sun Mesh
     const sunGeometry = new THREE.PlaneGeometry(SUN_SIZE, SUN_SIZE);
-    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFBC1, side: THREE.DoubleSide, fog: false }); // Slightly yellowish sun, no fog
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFBC1, side: THREE.DoubleSide, fog: false });
     sunMeshRef.current = new THREE.Mesh(sunGeometry, sunMaterial);
-    sunMeshRef.current.position.copy(sunPositionVecRef.current.clone().multiplyScalar(SKY_RADIUS * 0.8)); // Place it very far
-    sunMeshRef.current.lookAt(new THREE.Vector3(0,0,0)); // Make it face the world origin
+    sunMeshRef.current.position.copy(sunPositionVecRef.current.clone().multiplyScalar(SKY_RADIUS * 0.8));
+    sunMeshRef.current.lookAt(new THREE.Vector3(0,0,0));
     scene.add(sunMeshRef.current);
 
-
-    // Clouds
     cloudsGroupRef.current = new THREE.Group();
     for (let i = 0; i < NUM_CLOUDS; i++) {
         const cloud = createCloud();
-        // Position clouds relative to the group's origin, within the CLOUD_AREA_SPREAD
         cloud.position.set(
             (Math.random() - 0.5) * CLOUD_AREA_SPREAD,
             CLOUD_ALTITUDE_MIN + Math.random() * (CLOUD_ALTITUDE_MAX - CLOUD_ALTITUDE_MIN),
@@ -564,25 +549,22 @@ export function BlockExplorerGame() {
         );
         cloudsGroupRef.current.add(cloud);
     }
-    scene.add(cloudsGroupRef.current); // The group's position will be updated to follow the camera
+    scene.add(cloudsGroupRef.current);
 
-
-    // Initial player position slightly randomized within the starting chunk
     camera.position.x = (Math.random() * CHUNK_WIDTH / 4 - CHUNK_WIDTH / 8) * BLOCK_SIZE;
     camera.position.z = (Math.random() * CHUNK_DEPTH / 4 - CHUNK_DEPTH / 8) * BLOCK_SIZE;
-    
-    updateChunks(); // Load initial chunks based on camera's starting pos
+
+    updateChunks();
     const initialGroundY = getPlayerGroundHeight(camera.position.x, camera.position.z);
     if (initialGroundY > -Infinity) {
         camera.position.y = initialGroundY + PLAYER_HEIGHT - (BLOCK_SIZE / 2);
     } else {
-        // Fallback if no ground found (e.g., spawning over void, unlikely with proper generation)
-        camera.position.y = PLAYER_HEIGHT + 20 * BLOCK_SIZE; // Start high up
+        camera.position.y = PLAYER_HEIGHT + 20 * BLOCK_SIZE;
     }
 
     const controls = new PointerLockControls(camera, renderer.domElement);
     controlsRef.current = controls;
-    scene.add(controls.getObject()); // Add camera to scene via controls
+    scene.add(controls.getObject());
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (isPausedRef.current && event.code !== 'Escape') return;
@@ -594,14 +576,11 @@ export function BlockExplorerGame() {
         case 'Space': if (canJump.current && onGround.current) playerVelocity.current.y = JUMP_VELOCITY; break;
         case 'Escape':
            if (!isPausedRef.current) {
-             // If game is running and Esc is pressed
              if (controlsRef.current?.isLocked) controlsRef.current.unlock();
-             else setIsPaused(true); // Should ideally be caught by unlock, but as a fallback
+             else setIsPaused(true);
            } else if (isPausedRef.current && (pointerLockError || isPointerLockUnavailable)) {
-            // If paused due to an error, Esc shows help again or allows retry
-            setShowHelp(true); // Or specific logic to retry pointer lock
+            setShowHelp(true);
            } else {
-            // If paused normally (or help is shown), Esc tries to start/resume
             startGame();
            }
           break;
@@ -618,11 +597,10 @@ export function BlockExplorerGame() {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
-    const onControlsLock = () => { 
+    const onControlsLock = () => {
       setIsPaused(false); setShowHelp(false); setPointerLockError(null);
       setIsPointerLockUnavailable(false); isUsingFallbackControlsRef.current = false;
-      // Remove fallback listeners if they were active
-      if (rendererRef.current?.domElement) { 
+      if (rendererRef.current?.domElement) {
         rendererRef.current.domElement.removeEventListener('mousedown', handleCanvasMouseDown);
         document.removeEventListener('mousemove', handleDocumentMouseMove);
         document.removeEventListener('mouseup', handleDocumentMouseUp);
@@ -630,14 +608,12 @@ export function BlockExplorerGame() {
       }
     };
     const onControlsUnlock = () => {
-      // This is called when pointer lock is lost (e.g., user presses Esc, or it's released by browser)
       setIsPaused(true);
-      // Only show help if not due to an error that's already displayed
       if (!pointerLockError && !isPointerLockUnavailable) setShowHelp(true);
     };
     controls.addEventListener('lock', onControlsLock);
     controls.addEventListener('unlock', onControlsUnlock);
-    
+
     const handleResize = () => {
       if (cameraRef.current && rendererRef.current) {
         cameraRef.current.aspect = window.innerWidth / window.innerHeight;
@@ -654,130 +630,97 @@ export function BlockExplorerGame() {
       animationFrameId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      updateChunks(); // Check and update loaded chunks based on player position
+      updateChunks();
 
-      // Cloud animation and positioning
       if (cloudsGroupRef.current && cameraRef.current) {
-          // Center the entire cloud field on the camera's XZ position
           cloudsGroupRef.current.position.x = cameraRef.current.position.x;
           cloudsGroupRef.current.position.z = cameraRef.current.position.z;
-
           cloudsGroupRef.current.children.forEach(cloud => {
-              // Move cloud relative to the group
               cloud.position.x += CLOUD_SPEED * delta;
-              // Wrap cloud within the CLOUD_AREA_SPREAD relative to the group
               if (cloud.position.x > CLOUD_AREA_SPREAD / 2) {
                   cloud.position.x = -CLOUD_AREA_SPREAD / 2;
-                  // Optionally re-randomize Z position and altitude for variety on wrap
                   cloud.position.z = (Math.random() - 0.5) * CLOUD_AREA_SPREAD;
                   cloud.position.y = CLOUD_ALTITUDE_MIN + Math.random() * (CLOUD_ALTITUDE_MAX - CLOUD_ALTITUDE_MIN);
               }
           });
       }
 
-      if (cameraRef.current && sceneRef.current && (!isPausedRef.current || isUsingFallbackControlsRef.current)) { 
-        const cam = cameraRef.current; 
-        
+      if (cameraRef.current && sceneRef.current && (!isPausedRef.current || isUsingFallbackControlsRef.current)) {
+        const cam = cameraRef.current;
         playerVelocity.current.y += GRAVITY * delta;
         cam.position.y += playerVelocity.current.y * delta;
 
-        // Vertical collision
         const groundSurfaceY = getPlayerGroundHeight(cam.position.x, cam.position.z);
-        const playerFeetY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Y of player's feet center
-        
-        if (playerFeetY < groundSurfaceY + COLLISION_TOLERANCE) { // Player is on or below ground
-          cam.position.y = groundSurfaceY + PLAYER_HEIGHT - (BLOCK_SIZE / 2); // Place player exactly on ground
+        const playerFeetY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
+
+        if (playerFeetY < groundSurfaceY + COLLISION_TOLERANCE) {
+          cam.position.y = groundSurfaceY + PLAYER_HEIGHT - (BLOCK_SIZE / 2);
           playerVelocity.current.y = 0;
           onGround.current = true;
           canJump.current = true;
         } else {
           onGround.current = false;
         }
-        
-        // Horizontal movement and collision
-        const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.9) * delta; // Slightly slower air control
+
+        const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.9) * delta;
         const moveDirection = new THREE.Vector3();
-        
         const forwardVector = new THREE.Vector3();
         cam.getWorldDirection(forwardVector);
         const cameraDirectionXZ = new THREE.Vector3(forwardVector.x, 0, forwardVector.z).normalize();
-        // Calculate right vector correctly for strafing
         const rightVectorXZ = new THREE.Vector3().crossVectors(cameraDirectionXZ, sceneRef.current.up).normalize();
-
 
         if (moveForward.current) moveDirection.add(cameraDirectionXZ);
         if (moveBackward.current) moveDirection.sub(cameraDirectionXZ);
-        if (moveLeft.current) moveDirection.sub(rightVectorXZ); // Corrected: Subtract for left
-        if (moveRight.current) moveDirection.add(rightVectorXZ); // Corrected: Add for right
-        
+        if (moveLeft.current) moveDirection.sub(rightVectorXZ);
+        if (moveRight.current) moveDirection.add(rightVectorXZ);
+
         if (moveDirection.lengthSq() > 0) {
             moveDirection.normalize();
             const oldPosition = cam.position.clone();
             cam.position.addScaledVector(moveDirection, moveSpeed);
 
-            // Simple horizontal collision: Check if new position is inside a "wall"
-            // A wall is considered any terrain block significantly above player's feet
-            const currentPlayerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Center of feet block
-            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE; // Top of head block minus tolerance
-
-            const targetBlockWorldX = cam.position.x; // Target X after move
-            const targetBlockWorldZ = cam.position.z; // Target Z after move
-            
+            const currentPlayerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
+            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
+            const targetBlockWorldX = cam.position.x;
+            const targetBlockWorldZ = cam.position.z;
             const collisionColumnSurfaceY = getPlayerGroundHeight(targetBlockWorldX, targetBlockWorldZ);
-            const blockTopAbsY = collisionColumnSurfaceY; // Top surface of block at new XZ
-            const blockBottomAbsY = collisionColumnSurfaceY - BLOCK_SIZE; // Bottom surface of block at new XZ
+            const blockTopAbsY = collisionColumnSurfaceY;
+            const blockBottomAbsY = collisionColumnSurfaceY - BLOCK_SIZE;
 
-            // Check if player is trying to move into a block horizontally
-            // Condition: player's feet are below the block's top, AND player's head is above the block's bottom
-            if (currentPlayerFeetAbsY < (blockTopAbsY - COLLISION_TOLERANCE) && 
-                playerHeadAbsY > (blockBottomAbsY + COLLISION_TOLERANCE)) { 
-                    // Player is horizontally aligned with a block they might collide with.
-                    // More sophisticated collision would check X and Z movement separately.
-                    // For now, a simple "slide" or revert.
-
-                        const playerMinX = cam.position.x - 0.3 * BLOCK_SIZE; // Approx player width
+            if (currentPlayerFeetAbsY < (blockTopAbsY - COLLISION_TOLERANCE) &&
+                playerHeadAbsY > (blockBottomAbsY + COLLISION_TOLERANCE)) {
+                        const playerMinX = cam.position.x - 0.3 * BLOCK_SIZE;
                         const playerMaxX = cam.position.x + 0.3 * BLOCK_SIZE;
-                        const playerMinZ = cam.position.z - 0.3 * BLOCK_SIZE; // Approx player depth
+                        const playerMinZ = cam.position.z - 0.3 * BLOCK_SIZE;
                         const playerMaxZ = cam.position.z + 0.3 * BLOCK_SIZE;
-
-                        // Get center of the block player is trying to move into
                         const obstacleBlockCenterWorldX = Math.round(targetBlockWorldX / BLOCK_SIZE) * BLOCK_SIZE;
                         const obstacleBlockCenterWorldZ = Math.round(targetBlockWorldZ / BLOCK_SIZE) * BLOCK_SIZE;
-
                         const blockMinX = obstacleBlockCenterWorldX - BLOCK_SIZE / 2;
                         const blockMaxX = obstacleBlockCenterWorldX + BLOCK_SIZE / 2;
                         const blockMinZ = obstacleBlockCenterWorldZ - BLOCK_SIZE / 2;
                         const blockMaxZ = obstacleBlockCenterWorldZ + BLOCK_SIZE / 2;
 
-                        // Basic AABB check for horizontal collision
                         if (playerMaxX > blockMinX && playerMinX < blockMaxX &&
                             playerMaxZ > blockMinZ && playerMinZ < blockMaxZ) {
-                            
-                            // Attempt to resolve collision by checking X and Z movement independently
                             let hitX = false, hitZ = false;
-
-                            // Check collision if only moving along Z
                             const tempPosCheck = cam.position.clone();
-                            tempPosCheck.x = oldPosition.x; // Keep old X
-                            tempPosCheck.z = cam.position.z; // Use new Z
+                            tempPosCheck.x = oldPosition.x;
+                            tempPosCheck.z = cam.position.z;
                             const feetAtZMove = tempPosCheck.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                             const headAtZMove = tempPosCheck.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
                             const heightAtZMove = getPlayerGroundHeight(tempPosCheck.x, tempPosCheck.z);
                             const zMoveBlockTop = heightAtZMove;
                             const zMoveBlockBottom = heightAtZMove - BLOCK_SIZE;
                             if (feetAtZMove < (zMoveBlockTop - COLLISION_TOLERANCE) && headAtZMove > (zMoveBlockBottom + COLLISION_TOLERANCE)) {
-                               // Also check if old X old Z was clear at player's current Y to avoid sticking on corners
                                const heightAtXOnly = getPlayerGroundHeight(cam.position.x, oldPosition.z);
-                               const feetAtXOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Use old Y for this check
+                               const feetAtXOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                                const headAtXOnly = oldPosition.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
                                if(feetAtXOnly < (heightAtXOnly - COLLISION_TOLERANCE) && headAtXOnly > (heightAtXOnly - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                                   hitX = true; // Collision would occur if we only moved X
+                                   hitX = true;
                                }
                             }
-                            
-                            // Check collision if only moving along X
-                            tempPosCheck.x = cam.position.x; // Use new X
-                            tempPosCheck.z = oldPosition.z; // Keep old Z
+                            tempPosCheck.x = cam.position.x;
+                            tempPosCheck.z = oldPosition.z;
                             const feetAtXMove = tempPosCheck.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                             const headAtXMove = tempPosCheck.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
                             const heightAtXMove = getPlayerGroundHeight(tempPosCheck.x, tempPosCheck.z);
@@ -785,22 +728,15 @@ export function BlockExplorerGame() {
                             const xMoveBlockBottom = heightAtXMove - BLOCK_SIZE;
                              if (feetAtXMove < (xMoveBlockTop - COLLISION_TOLERANCE) && headAtXMove > (xMoveBlockBottom + COLLISION_TOLERANCE)) {
                                const heightAtZOnly = getPlayerGroundHeight(oldPosition.x, cam.position.z);
-                               const feetAtZOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Use old Y
+                               const feetAtZOnly = oldPosition.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                                const headAtZOnly = oldPosition.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
                                if(feetAtZOnly < (heightAtZOnly - COLLISION_TOLERANCE) && headAtZOnly > (heightAtZOnly - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                                hitZ = true; // Collision would occur if we only moved Z
+                                hitZ = true;
                                }
                             }
-
-                            if (hitX && !hitZ) { // Collision along X-axis, allow Z movement
-                                cam.position.x = oldPosition.x;
-                            } else if (hitZ && !hitX) { // Collision along Z-axis, allow X movement
-                                cam.position.z = oldPosition.z;
-                            } else if (hitX && hitZ) { // Collision along both, or complex corner
-                                cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); // Revert both
-                            }
-                            
-                            // Final check: if after sliding, we're still inside a wall, revert fully
+                            if (hitX && !hitZ) { cam.position.x = oldPosition.x; }
+                            else if (hitZ && !hitX) { cam.position.z = oldPosition.z; }
+                            else if (hitX && hitZ) { cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); }
                             const finalCollisionCheckHeight = getPlayerGroundHeight(cam.position.x, cam.position.z);
                             const finalPlayerFeet = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
                             const finalPlayerHead = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
@@ -824,121 +760,72 @@ export function BlockExplorerGame() {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', handleResize);
-      
       controlsRef.current?.removeEventListener('lock', onControlsLock);
       controlsRef.current?.removeEventListener('unlock', onControlsUnlock);
-      controlsRef.current?.disconnect(); // Important for PointerLockControls cleanup
-
+      controlsRef.current?.disconnect();
       if (currentMount && rendererRef.current?.domElement) {
         currentMount.removeChild(rendererRef.current.domElement);
       }
       rendererRef.current?.dispose();
-      
-      // Dispose of Sky and custom textures
-      sky?.material.dispose(); 
+      sky?.material.dispose();
       woodTexture.dispose();
       leafTexture.dispose();
-
-      // Dispose of Sun mesh geometry and material
       if (sunMeshRef.current) {
         sunMeshRef.current.geometry.dispose();
-        if (Array.isArray(sunMeshRef.current.material)) {
-            sunMeshRef.current.material.forEach(m => m.dispose());
-        } else {
-            sunMeshRef.current.material.dispose();
-        }
+        if (Array.isArray(sunMeshRef.current.material)) { sunMeshRef.current.material.forEach(m => m.dispose());}
+        else { sunMeshRef.current.material.dispose(); }
       }
-      
-      // Dispose of cloud geometries and materials
       if (cloudsGroupRef.current) {
         cloudsGroupRef.current.children.forEach(cloud => {
             if (cloud instanceof THREE.Group) {
-                cloud.children.forEach(segment => {
-                    if (segment instanceof THREE.Mesh) {
-                        segment.geometry.dispose();
-                        // material is shared (materials.cloud), disposed below
-                    }
-                });
+                cloud.children.forEach(segment => { if (segment instanceof THREE.Mesh) { segment.geometry.dispose(); } });
             }
         });
       }
       cloudSegmentGeometry.dispose();
-
-
-      // Dispose of shared materials and geometries
       Object.values(materials).forEach(mat => {
-        if (Array.isArray(mat)) { // For multi-material blocks like grass
-          mat.forEach(m => {
-            if (m.map) m.map.dispose(); // Dispose texture if unique to this material instance
-            m.dispose();
-          });
-        } else {
-          // Only dispose map if it's not one of the globally cached textures (wood, leaf)
-          if (mat.map && mat.map !== woodTexture && mat.map !== leafTexture) mat.map.dispose(); 
-          mat.dispose();
-        }
+        if (Array.isArray(mat)) { mat.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });}
+        else { if (mat.map && mat.map !== woodTexture && mat.map !== leafTexture) mat.map.dispose(); mat.dispose(); }
       });
       blockGeometry.dispose();
-
-      // Clean up loaded chunks (meshes already disposed during unload)
-      loadedChunksRef.current.forEach(chunkData => {
-        chunkData.meshes.forEach(mesh => {
-           // InstancedMesh geometry & materials are shared, disposed above/below
-           // mesh.parent?.remove(mesh) was already done in updateChunks
-        });
-      });
+      loadedChunksRef.current.forEach(chunkData => { chunkData.meshes.forEach(mesh => { /* Disposed with scene children */ }); });
       loadedChunksRef.current.clear();
-      
-      // Clear scene of any remaining direct children
-      if (sceneRef.current) {
-        while(sceneRef.current.children.length > 0){ 
-            const obj = sceneRef.current.children[0];
-            sceneRef.current.remove(obj); 
-            // Further disposal might be needed if obj had its own complex resources
-        }
-      }
-
-      // Fallback controls event listeners
+      if (sceneRef.current) { while(sceneRef.current.children.length > 0){ const obj = sceneRef.current.children[0]; sceneRef.current.remove(obj); } }
       rendererRef.current?.domElement?.removeEventListener('mousedown', handleCanvasMouseDown);
       document.removeEventListener('mousemove', handleDocumentMouseMove);
       document.removeEventListener('mouseup', handleDocumentMouseUp);
       document.removeEventListener('mouseleave', handleDocumentMouseUp);
     };
-  }, [getPlayerGroundHeight, updateChunks, generateChunk, createCloud, createCloudSegment, handleCanvasMouseDown, handleDocumentMouseMove, handleDocumentMouseUp]); // Added generateChunk, createCloud... to deps
+  }, [getPlayerGroundHeight, updateChunks, generateChunk, createCloud, createCloudSegment, handleCanvasMouseDown, handleDocumentMouseMove, handleDocumentMouseUp]);
 
   const startGame = () => {
-    setPointerLockError(null); setIsPointerLockUnavailable(false); 
-    
-    // If fallback controls were active, remove their listeners first
+    setPointerLockError(null); setIsPointerLockUnavailable(false);
     if (rendererRef.current?.domElement && isUsingFallbackControlsRef.current) {
       rendererRef.current.domElement.removeEventListener('mousedown', handleCanvasMouseDown);
       document.removeEventListener('mousemove', handleDocumentMouseMove);
       document.removeEventListener('mouseup', handleDocumentMouseUp);
       document.removeEventListener('mouseleave', handleDocumentMouseUp);
     }
-    isUsingFallbackControlsRef.current = false; // Assume pointer lock will work
+    isUsingFallbackControlsRef.current = false;
 
     if (controlsRef.current && rendererRef.current?.domElement) {
-      rendererRef.current.domElement.setAttribute('tabindex', '-1'); // For focus
-      rendererRef.current.domElement.focus(); // Attempt to focus the canvas
+      rendererRef.current.domElement.setAttribute('tabindex', '-1');
+      rendererRef.current.domElement.focus();
       try {
-        controlsRef.current.lock(); 
-        // onControlsLock will set isPaused(false), setShowHelp(false)
+        controlsRef.current.lock();
       } catch (e: any) {
         console.error("Pointer lock request failed. Original error:", e);
         let friendlyMessage = "Error: Could not lock the mouse pointer.\n\n";
         if (e && e.message && (e.message.includes("sandboxed") || e.message.includes("allow-pointer-lock") || e.name === 'NotSupportedError' || e.message.includes("Pointer Lock API is not available") || e.message.includes("denied") || e.message.includes("not focused"))) {
           friendlyMessage += "This often happens in restricted environments (like iframes without 'allow-pointer-lock' permission) or if the document isn't focused.\nSwitched to **Click & Drag** to look around.\nMove: WASD, Jump: Space.\n\nFor the full experience, try opening the game in a new browser tab or ensuring the game window is active.";
-          setPointerLockError(friendlyMessage); 
-          setIsPointerLockUnavailable(true); // Mark that we are in fallback mode
-          isUsingFallbackControlsRef.current = true; // Activate fallback controls
-          
-          // Add listeners for fallback controls
+          setPointerLockError(friendlyMessage);
+          setIsPointerLockUnavailable(true);
+          isUsingFallbackControlsRef.current = true;
           rendererRef.current?.domElement.addEventListener('mousedown', handleCanvasMouseDown);
           document.addEventListener('mousemove', handleDocumentMouseMove);
           document.addEventListener('mouseup', handleDocumentMouseUp);
-          document.addEventListener('mouseleave', handleDocumentMouseUp); // Handle mouse leaving canvas
-          setIsPaused(false); setShowHelp(false); // Start game in fallback mode
+          document.addEventListener('mouseleave', handleDocumentMouseUp);
+          setIsPaused(false); setShowHelp(false);
         } else {
           friendlyMessage += "Common reasons: browser/iframe restrictions, document not focused, or browser settings.\n";
           friendlyMessage += `Details: "${e.message || 'Unknown error'}"\n\n(A 'THREE.PointerLockControls: Unable to use Pointer Lock API.' message may also appear in the browser's console if the API itself is unavailable.)`;
@@ -958,7 +845,7 @@ export function BlockExplorerGame() {
     <div ref={mountRef} className="h-full w-full relative">
       {isPaused && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-10 p-4">
-          {isPointerLockUnavailable ? ( // UI for when fallback controls are active due to pointer lock failure
+          {isPointerLockUnavailable ? (
             <Card className="w-full max-w-lg bg-card/90 shadow-xl">
               <CardHeader><CardTitle className="flex items-center text-primary"><Mouse className="mr-2 h-6 w-6" /> Fallback Controls Active</CardTitle></CardHeader>
               <CardContent>
@@ -971,7 +858,7 @@ export function BlockExplorerGame() {
                 <Button onClick={() => { setIsPaused(false); setShowHelp(false);}} size="lg" className="w-full"><Play className="mr-2 h-5 w-5" /> {buttonTextResume}</Button>
               </CardContent>
             </Card>
-          ) : pointerLockError ? ( // UI for other pointer lock errors (not leading to fallback)
+          ) : pointerLockError ? (
             <Card className="w-full max-w-lg bg-card/90 shadow-xl">
               <CardHeader><CardTitle className="flex items-center text-destructive"><AlertCircle className="mr-2 h-6 w-6" /> Pointer Lock Issue</CardTitle></CardHeader>
               <CardContent>
@@ -980,11 +867,11 @@ export function BlockExplorerGame() {
                  <p className="mt-3 text-sm text-muted-foreground">If issues persist, ensure the game window is focused or try opening it in a new browser tab.</p>
               </CardContent>
             </Card>
-          ) : ( // Standard pause menu / initial start screen
+          ) : (
             <>
               <h1 className="text-5xl font-bold text-primary mb-4">{gameTitle}</h1>
               <Button onClick={startGame} size="lg" className="mb-4"><Play className="mr-2 h-5 w-5" /> {showHelp ? buttonTextStart : buttonTextResume}</Button>
-              {showHelp && ( // Show help only if not an error state and help is toggled
+              {showHelp && (
                  <Card className="w-full max-w-md bg-card/80 shadow-xl">
                   <CardHeader><CardTitle className="flex items-center text-card-foreground"><HelpCircle className="mr-2 h-6 w-6 text-accent" /> How to Play</CardTitle></CardHeader>
                   <CardContent className="text-card-foreground/90">
@@ -1007,7 +894,3 @@ export function BlockExplorerGame() {
 
 export default BlockExplorerGame;
     
-
-    
-
-

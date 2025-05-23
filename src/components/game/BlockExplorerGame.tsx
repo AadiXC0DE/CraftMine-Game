@@ -246,7 +246,7 @@ export function BlockExplorerGame() {
         if (highestSolidBlockCenterY < WATER_LEVEL_Y_CENTER) { // Topmost solid block's center is below water center -> definitely sand
           surfaceBlockType = 'sand';
         } else if (highestSolidBlockCenterY === WATER_LEVEL_Y_CENTER) { // Topmost solid block's center is AT water center (its top is at water surface)
-          if (Math.random() < 0.4) { // 40% chance for sand at water's edge
+          if (Math.random() < 0.15) { // 15% chance for sand at water's edge
              surfaceBlockType = 'sand';
           } else {
              surfaceBlockType = 'grass'; // Grass block whose top is at water surface

@@ -222,7 +222,7 @@ export function BlockExplorerGame() {
         const worldZPos = (chunkZ * CHUNK_DEPTH + z) * BLOCK_SIZE;
 
         // Determine base terrain height in blocks
-        let primaryHills = noise.noise(globalNoiseX / 35, globalNoiseZ / 35, 0) * 7 + 6; // Lowered from +10 to +6 to allow more water
+        let primaryHills = noise.noise(globalNoiseX / 35, globalNoiseZ / 35, 0) * 7 + 7; // Lowered from +10 to +6 to allow more water, now +7 for less water
         let secondaryDetail = noise.noise(globalNoiseX / 12, globalNoiseZ / 12, 0.5) * 3; // Fine details, range -3 to 3
 
         // Mountain influence
@@ -245,9 +245,9 @@ export function BlockExplorerGame() {
           const matrix = new THREE.Matrix4().setPosition(worldXPos, blockCenterY, worldZPos);
 
           if (yBlockIndex === baseTerrainHeightBlocks - 1) { // This is the topmost solid block
-            if (blockCenterY < WATER_LEVEL_Y_CENTER) { // If its center is below water center
+            if (blockCenterY < WATER_LEVEL_Y_CENTER) { // If its center is below water center (underwater ground)
               blockInstances.sand.push(matrix);
-            } else {
+            } else { // Exposed ground
               blockInstances.grass.push(matrix);
             }
           } else { // Blocks underneath the surface
@@ -753,8 +753,8 @@ export function BlockExplorerGame() {
 
         if (moveForward.current) moveDirection.add(cameraDirectionXZ);
         if (moveBackward.current) moveDirection.sub(cameraDirectionXZ);
-        if (moveLeft.current) moveDirection.sub(rightVectorXZ); // Corrected: subtract for left
-        if (moveRight.current) moveDirection.add(rightVectorXZ); // Corrected: add for right
+        if (moveLeft.current) moveDirection.sub(rightVectorXZ); 
+        if (moveRight.current) moveDirection.add(rightVectorXZ); 
 
 
         if (moveDirection.lengthSq() > 0) { // Only process if there's movement input
@@ -763,7 +763,6 @@ export function BlockExplorerGame() {
             cam.position.addScaledVector(moveDirection, moveSpeed);
 
             // Simple horizontal collision: check the block column the player is moving into
-            // This is a very basic form of collision and can be improved.
             const currentPlayerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); // Feet relative to world origin
             const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE; // Head relative to world origin
             const targetBlockWorldX = cam.position.x;
@@ -1009,3 +1008,4 @@ export function BlockExplorerGame() {
 
 export default BlockExplorerGame;
     
+

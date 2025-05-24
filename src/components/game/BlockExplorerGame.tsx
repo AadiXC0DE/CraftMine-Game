@@ -20,6 +20,7 @@ const PLAYER_HEIGHT = BLOCK_SIZE * 1.75;
 const PLAYER_SPEED = 5.0;
 const GRAVITY = -15.0;
 const JUMP_VELOCITY = 7.0;
+const MAX_VERTICAL_COLLISION_STEP = BLOCK_SIZE * 0.5; // Max height step player can climb automatically
 const VIEW_DISTANCE_CHUNKS = 4; // Load chunks in a square of (2*VD+1) x (2*VD+1)
 const COLLISION_TOLERANCE = 1e-3; // Small tolerance for physics calculations
 
@@ -41,7 +42,10 @@ const WATER_LEVEL_Y_CENTER = 4 * BLOCK_SIZE; // Center Y of the highest water bl
 const MAX_TERRAIN_HEIGHT_BLOCKS = 35; // Max height of terrain in blocks, increased for mountains
 
 // Flower Constants
-const FLOWER_PLANE_DIM = BLOCK_SIZE * 0.7; // Width and height of flower planes
+const PLANT_PLANE_DIM = BLOCK_SIZE * 0.7; // Width and height for cross-plane plants (flowers, tall grass)
+const TALL_GRASS_HEIGHT_MULTIPLIER = 1.5; // Tall grass is slightly taller than a block
+const TALL_GRASS_SPAWN_PROBABILITY = 0.01; // Chance to spawn tall grass on a grass block (Less common than flowers)
+const TALL_GRASS_MATERIAL_COLOR = '#558B2F'; // Darker green for tall grass
 const FLOWER_SPAWN_PROBABILITY = 0.025; // Chance to spawn a flower on a grass block (Reduced by 75% from 0.1)
 
 
@@ -139,8 +143,8 @@ function createFlowerTexture(
   petalShapeFn: (ctx: CanvasRenderingContext2D, w: number, h: number, petalColor: string) => void
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  const texSize = 32;
-  canvas.width = texSize;
+  const texSize = 64; // Higher resolution for better detail
+  canvas.width = texSize / 2; // Make it narrower, height is more important
   canvas.height = texSize;
   const ctx = canvas.getContext('2d')!;
 
@@ -148,14 +152,14 @@ function createFlowerTexture(
 
   // Stem (drawn first, petals will overlap)
   ctx.fillStyle = stemColor;
-  const stemWidth = texSize * 0.1;
+  const stemWidth = texSize * 0.08; // Slightly narrower stem
   const stemHeight = texSize * 0.6; // Stem occupies bottom 60%
   // Stem from 40% Y down to bottom of canvas
-  ctx.fillRect(texSize / 2 - stemWidth / 2, texSize * 0.4, stemWidth, stemHeight);
+  ctx.fillRect(canvas.width / 2 - stemWidth / 2, texSize * 0.4, stemWidth, stemHeight);
 
   // Petals (drawn in the top 0% to 40% Y of the canvas)
-  petalShapeFn(ctx, texSize, texSize, petalColor);
-
+  petalShapeFn(ctx, canvas.width, texSize, petalColor); // Use canvas.width, not texSize
+  
   const texture = new CanvasTexture(canvas);
   texture.needsUpdate = true;
   return texture;
@@ -356,6 +360,40 @@ const drawPoppyPetals = (ctx: CanvasRenderingContext2D, w: number, h: number, co
   ctx.fill();
 };
 
+// Tall Grass Texture (simpler for generic grass)
+function createTallGrassTexture(): THREE.CanvasTexture {
+   const canvas = document.createElement('canvas');
+   const texSize = 128; // Higher resolution
+   canvas.width = texSize / 2; // Narrower, tall aspect
+   canvas.height = texSize;
+   const ctx = canvas.getContext('2d')!;
+
+   ctx.clearRect(0, 0, canvas.width, canvas.height); // Transparent background
+
+  const bladeColorBase = '#558B2F'; // Darker Green
+  const bladeColorLight = '#7CB342'; // Light Green
+
+   // Draw multiple distinct grass blades/clumps
+  const numBlades = 8; // More blades for denser look
+  const maxBladeWidth = canvas.width * 0.15;
+
+  for (let i = 0; i < numBlades; i++) {
+    const baseX = (canvas.width / (numBlades + 1)) * (i + 1) + (Math.random() - 0.5) * canvas.width * 0.1; // Spread out with some randomness
+    const startY = canvas.height * (0.05 + Math.random() * 0.1); // Start lower
+    const tipY = canvas.height * (0.9 + Math.random() * 0.1); // Reach higher
+    const bladeWidth = maxBladeWidth * (0.5 + Math.random() * 0.5); // Vary width
+
+    ctx.fillStyle = Math.random() < 0.5 ? bladeColorBase : bladeColorLight;
+    ctx.beginPath();
+    ctx.moveTo(baseX + (Math.random() - 0.5) * 3, canvas.height); // Base at bottom
+    ctx.quadraticCurveTo(baseX + (Math.random() - 0.5) * 10, startY + (tipY - startY) * 0.5, baseX + (Math.random() - 0.5) * 2, startY); // Curve upwards
+    ctx.lineTo(baseX + (Math.random() - 0.5) * 2, startY); 
+    ctx.fill();
+  }
+
+   const texture = new CanvasTexture(canvas); texture.needsUpdate = true;
+   return texture;
+}
 
 // --- Flower Definitions ---
 interface FlowerDefinition {
@@ -377,12 +415,12 @@ const flowerDefinitions: FlowerDefinition[] = [
 
 // --- Geometries (created once) ---
 const blockGeometry = new BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-const cloudSegmentGeometry = new BoxGeometry(CLOUD_SEGMENT_BASE_SIZE, CLOUD_SEGMENT_THICKNESS, CLOUD_SEGMENT_BASE_SIZE);
+const cloudSegmentGeometry = new BoxGeometry(CLOUD_SEGMENT_BASE_SIZE, CLOUD_SEGMENT_THICKNESS, CLOUD_SEGMENT_BASE_SIZE); // Kept separate
 
 const FLOWER_CROSS_GEOMETRY = (() => {
     const geometry = new BufferGeometry();
-    const w_geom = FLOWER_PLANE_DIM / 2;
-    const h_geom = FLOWER_PLANE_DIM / 2;
+    const w_geom = PLANT_PLANE_DIM / 2;
+    const h_geom = PLANT_PLANE_DIM / 2; // Use PLANT_PLANE_DIM for flowers
 
     const vertices_corrected = new Float32Array([
         // Plane 1 (on XY, billboard towards Z)
@@ -407,6 +445,28 @@ const FLOWER_CROSS_GEOMETRY = (() => {
 })();
 
 
+const TALL_GRASS_CROSS_GEOMETRY = (() => {
+    const geometry = new BufferGeometry();
+    const w_geom = PLANT_PLANE_DIM / 2;
+    const h_geom = PLANT_PLANE_DIM * TALL_GRASS_HEIGHT_MULTIPLIER / 2; // Taller height
+
+    const vertices_corrected = new Float32Array([
+        // Plane 1 (on XY, billboard towards Z)
+        -w_geom, -h_geom, 0,   w_geom, -h_geom, 0,   w_geom,  h_geom, 0,
+        -w_geom, -h_geom, 0,   w_geom,  h_geom, 0,  -w_geom,  h_geom, 0,
+        // Plane 2 (on ZY, billboard towards X)
+        0, -h_geom, -w_geom,   0, -h_geom,  w_geom,   0,  h_geom,  w_geom,
+        0, -h_geom, -w_geom,   0,  h_geom,  w_geom,   0,  h_geom, -w_geom,
+    ]);
+    geometry.setAttribute('position', new BufferAttribute(vertices_corrected, 3));
+
+     const uvs = new Float32Array([0, 0,  1, 0,  1, 1, 0, 0,  1, 1,  0, 1, 0, 0,  1, 0,  1, 1, 0, 0,  1, 1,  0, 1]);
+    geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+
+    geometry.computeVertexNormals();
+    return geometry;
+})();
+
 // --- Materials (cached at module level) ---
 const woodTexture = createWoodTexture();
 const leafTexture = createLeafTexture();
@@ -419,6 +479,7 @@ const materials = {
   cloud: new MeshBasicMaterial({ color: 0xffffff, side: DoubleSide, transparent: true, opacity: 0.9 }),
   water: new MeshStandardMaterial({ color: 0x4682B4, opacity: 0.65, transparent: true, roughness: 0.1, metalness: 0.1, side: DoubleSide }),
   sand: new MeshStandardMaterial({ color: 0xF4A460, roughness: 0.9, metalness: 0.1 }),
+  tallGrass: new MeshBasicMaterial({ map: createTallGrassTexture(), alphaTest: 0.2, transparent: true, side: DoubleSide }),
 };
 
 // Initialize flower materials
@@ -482,8 +543,8 @@ export function BlockExplorerGame() {
     const chunkTerrainHeights: number[][] = Array(CHUNK_WIDTH).fill(null).map(() => Array(CHUNK_DEPTH).fill(0));
     const blockInstances: { [key: string]: THREE.Matrix4[] } = {
       grass: [], dirt: [], wood: [], leaves: [], water: [], sand: [],
-      ...flowerDefinitions.reduce((acc, def) => {
-        acc[`flower_${def.name}`] = [];
+ tallGrass: [], ...flowerDefinitions.reduce((acc, def) => {
+        acc[`plant_${def.name}`] = []; // Using 'plant_' prefix for flowers
         return acc;
       }, {} as Record<string, THREE.Matrix4[]>)
     };
@@ -531,19 +592,35 @@ export function BlockExplorerGame() {
         }
 
         if (surfaceBlockType === 'grass') { 
-            if (Math.random() < FLOWER_SPAWN_PROBABILITY) {
+             // Decide what plant to spawn, if any
+            const plantType = Math.random();
+            const plantTopSurfaceY = chunkTerrainHeights[x][z]; // This is the center Y of the highest block
+
+            if (plantType < TALL_GRASS_SPAWN_PROBABILITY) {
+                 // Spawn Tall Grass
+                const tallGrassCenterY = plantTopSurfaceY - (BLOCK_SIZE / 2) + (PLANT_PLANE_DIM * TALL_GRASS_HEIGHT_MULTIPLIER / 2);
+                const tallGrassMatrix = new Matrix4().setPosition(
+                     worldXPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6, // Slight random offset
+                    tallGrassCenterY,
+                    worldZPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6  // Slight random offset
+                );
+                tallGrassMatrix.multiply(new Matrix4().makeRotationY(Math.random() * Math.PI * 2)); // Random rotation
+                blockInstances['tallGrass'].push(tallGrassMatrix);
+
+            } else if (plantType < TALL_GRASS_SPAWN_PROBABILITY + FLOWER_SPAWN_PROBABILITY) {
+                 // Spawn a random Flower
                 const randomFlowerDef = flowerDefinitions[Math.floor(Math.random() * flowerDefinitions.length)];
-                const flowerTopSurfaceY = chunkTerrainHeights[x][z]; 
-                const flowerCenterY = flowerTopSurfaceY - (BLOCK_SIZE / 2) + (FLOWER_PLANE_DIM / 2);
+                const flowerCenterY = plantTopSurfaceY - (BLOCK_SIZE / 2) + (PLANT_PLANE_DIM / 2); // Flower plane is smaller
 
                 const flowerMatrix = new Matrix4().setPosition(
-                    worldXPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6, 
+                    worldXPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6, // Slight random offset
                     flowerCenterY,
-                    worldZPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6
+                    worldZPos + (Math.random() - 0.5) * BLOCK_SIZE * 0.6  // Slight random offset
                 );
-                flowerMatrix.multiply(new Matrix4().makeRotationY(Math.random() * Math.PI * 2));
-                blockInstances[`flower_${randomFlowerDef.name}`].push(flowerMatrix);
+                flowerMatrix.multiply(new Matrix4().makeRotationY(Math.random() * Math.PI * 2)); // Random rotation
+                blockInstances[`plant_${randomFlowerDef.name}`].push(flowerMatrix);
             }
+
         }
 
         for (let yWaterCenter = highestSolidBlockCenterY + BLOCK_SIZE; yWaterCenter <= WATER_LEVEL_Y_CENTER; yWaterCenter += BLOCK_SIZE) {
@@ -627,14 +704,16 @@ export function BlockExplorerGame() {
         let castShadow = true;
         let receiveShadow = true;
 
-        if (type.startsWith('flower_')) {
-            const flowerName = type.substring('flower_'.length);
-            const flowerDef = flowerDefinitions.find(fd => fd.name === flowerName);
-            if (!flowerDef || !flowerDef.material) return; 
-            currentMaterial = flowerDef.material;
-            currentGeometry = FLOWER_CROSS_GEOMETRY;
-            castShadow = false; 
-            receiveShadow = false;
+        if (type.startsWith('plant_')) {
+            const plantName = type.substring('plant_'.length);
+            if (plantName === 'tallGrass') {
+ currentMaterial = materials.tallGrass;
+ currentGeometry = TALL_GRASS_CROSS_GEOMETRY;
+            } else { 
+            const flowerName = plantName; 
+            const flowerDef = flowerDefinitions.find(fd => fd.name === flowerName); if (!flowerDef || !flowerDef.material) return; currentMaterial = flowerDef.material; currentGeometry = FLOWER_CROSS_GEOMETRY;
+            }
+            castShadow = false; receiveShadow = false; 
         } else if (type === 'grass') {
           currentMaterial = [
             materials.dirt, materials.dirt, 
@@ -944,57 +1023,81 @@ export function BlockExplorerGame() {
             const targetBlockWorldX = cam.position.x;
             const targetBlockWorldZ = cam.position.z;
             const collisionColumnSurfaceY = getPlayerGroundHeight(targetBlockWorldX, targetBlockWorldZ); 
-            
             const blockTopAbsY = collisionColumnSurfaceY;
+
+            // Check if player is trying to step up a small amount
+            if (onGround.current && playerFeetAbsY + COLLISION_TOLERANCE < blockTopAbsY && blockTopAbsY - (playerFeetAbsY + COLLISION_TOLERANCE) <= MAX_VERTICAL_COLLISION_STEP) {
+                 // Allow stepping up by adjusting player Y position
+                 cam.position.y = blockTopAbsY + PLAYER_HEIGHT - (BLOCK_SIZE / 2) + COLLISION_TOLERANCE;
+                 playerVelocity.current.y = 0; // Reset vertical velocity after stepping up
+                 onGround.current = true; // Still on ground
+                 canJump.current = true;
+                 // No need for further XZ collision checks for this specific step-up scenario
+            } else {
+            // Standard horizontal collision check if not stepping up
             const blockBottomAbsY = collisionColumnSurfaceY - BLOCK_SIZE; 
 
-            if (playerFeetAbsY < (blockTopAbsY - COLLISION_TOLERANCE) && playerHeadAbsY > (blockBottomAbsY + COLLISION_TOLERANCE) ) {
-                const playerMinX = cam.position.x - 0.3 * BLOCK_SIZE; 
-                const playerMaxX = cam.position.x + 0.3 * BLOCK_SIZE;
-                const playerMinZ = cam.position.z - 0.3 * BLOCK_SIZE; 
-                const playerMaxZ = cam.position.z + 0.3 * BLOCK_SIZE;
+             // Basic collision box around the player
+             const playerMinX = cam.position.x - 0.4 * BLOCK_SIZE; // Adjusted for slight player size
+             const playerMaxX = cam.position.x + 0.4 * BLOCK_SIZE; // Adjusted for slight player size
+             const playerMinZ = cam.position.z - 0.3 * BLOCK_SIZE; 
+             const playerMaxZ = cam.position.z + 0.3 * BLOCK_SIZE;
 
-                const obstacleBlockCenterWorldX = Math.round(targetBlockWorldX / BLOCK_SIZE) * BLOCK_SIZE;
-                const obstacleBlockCenterWorldZ = Math.round(targetBlockWorldZ / BLOCK_SIZE) * BLOCK_SIZE;
+             // Iterate through loaded chunks to check for collision with wood blocks
+             let collidedWithWood = false;
+             loadedChunksRef.current.forEach((chunkData, chunkKey) => {
+                 const [chunkX, chunkZ] = chunkKey.split(',').map(Number);
+                 const chunkWorldMinX = chunkX * CHUNK_WIDTH * BLOCK_SIZE - BLOCK_SIZE/2;
+                 const chunkWorldMaxX = (chunkX + 1) * CHUNK_WIDTH * BLOCK_SIZE + BLOCK_SIZE/2;
+                 const chunkWorldMinZ = chunkZ * CHUNK_DEPTH * BLOCK_SIZE - BLOCK_SIZE/2;
+                 const chunkWorldMaxZ = (chunkZ + 1) * CHUNK_DEPTH * BLOCK_SIZE + BLOCK_SIZE/2;
+                
+                 // Quick check if player bounding box overlaps with chunk bounds
+                 if (playerMaxX > chunkWorldMinX && playerMinX < chunkWorldMaxX && playerMaxZ > chunkWorldMinZ && playerMinZ < chunkWorldMaxZ) {
+                     chunkData.meshes.forEach(mesh => {
+                         if (mesh.material instanceof MeshStandardMaterial && mesh.material.map === woodTexture) { 
+                             // This is a wood instanced mesh
+                             const matrixWorld = new Matrix4();
+                             for (let i = 0; i < mesh.count; i++) {
+                                 mesh.getMatrixAt(i, matrixWorld);
+                                 const position = new Vector3().setFromMatrixPosition(matrixWorld);
 
-                const blockMinX = obstacleBlockCenterWorldX - BLOCK_SIZE / 2;
-                const blockMaxX = obstacleBlockCenterWorldX + BLOCK_SIZE / 2;
-                const blockMinZ = obstacleBlockCenterWorldZ - BLOCK_SIZE / 2;
-                const blockMaxZ = obstacleBlockCenterWorldZ + BLOCK_SIZE / 2;
+                                 // Calculate bounding box for this specific wood instance
+                                 const blockMinX = position.x - BLOCK_SIZE / 2;
+                                 const blockMaxX = position.x + BLOCK_SIZE / 2;
+                                 const blockMinY = position.y - BLOCK_SIZE / 2;
+                                 const blockMaxY = position.y + BLOCK_SIZE / 2;
+                                 const blockMinZ = position.z - BLOCK_SIZE / 2;
+                                 const blockMaxZ = position.z + BLOCK_SIZE / 2;
 
-                if (playerMaxX > blockMinX && playerMinX < blockMaxX && playerMaxZ > blockMinZ && playerMinZ < blockMaxZ) {
-                    let hitX = false, hitZ = false;
-
-                    const tempPosCheckZ = oldPosition.clone();
-                    tempPosCheckZ.z = cam.position.z;  
-                    const feetAtZMove = tempPosCheckZ.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                    const headAtZMove = tempPosCheckZ.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                    const heightAtZMove = getPlayerGroundHeight(tempPosCheckZ.x, tempPosCheckZ.z);
-                    if (feetAtZMove < (heightAtZMove - COLLISION_TOLERANCE) && headAtZMove > (heightAtZMove - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                        hitZ = true;
-                    }
-
-                    const tempPosCheckX = oldPosition.clone();
-                    tempPosCheckX.x = cam.position.x; 
-                    const feetAtXMove = tempPosCheckX.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                    const headAtXMove = tempPosCheckX.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                    const heightAtXMove = getPlayerGroundHeight(tempPosCheckX.x, tempPosCheckX.z);
-                     if (feetAtXMove < (heightAtXMove - COLLISION_TOLERANCE) && headAtXMove > (heightAtXMove - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                        hitX = true;
-                    }
-                    
-                    if (hitX && !hitZ) cam.position.x = oldPosition.x; 
-                    else if (hitZ && !hitX) cam.position.z = oldPosition.z; 
-                    else if (hitX && hitZ) cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); 
-
-                    const finalCollisionCheckHeight = getPlayerGroundHeight(cam.position.x, cam.position.z);
-                    const finalPlayerFeet = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2);
-                    const finalPlayerHead = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
-                    if (finalPlayerFeet < (finalCollisionCheckHeight - COLLISION_TOLERANCE) && finalPlayerHead > (finalCollisionCheckHeight - BLOCK_SIZE + COLLISION_TOLERANCE)) {
-                        cam.position.set(oldPosition.x, cam.position.y, oldPosition.z); 
-                    }
-                }
-            }
+                                 // Check for intersection with player bounding box
+                                 if (playerMaxX > blockMinX + COLLISION_TOLERANCE && playerMinX < blockMaxX - COLLISION_TOLERANCE && playerHeadAbsY > blockMinY + COLLISION_TOLERANCE && playerFeetAbsY < blockMaxY - COLLISION_TOLERANCE && playerMaxZ > blockMinZ + COLLISION_TOLERANCE && playerMinZ < blockMaxZ - COLLISION_TOLERANCE) {
+                                     collidedWithWood = true;
+                         // This is still not accurate block type lookup. 
+                         // A proper voxel structure or collision grid is needed for accurate collision per block type.
+                         // However, to fulfill the requirement of colliding with 'tree wood',
+                         // we can implement the collision logic and mention this limitation.
+                         // For the *purpose of demonstrating collision with a specific block type*,
+                         // let's *assume* that any solid block the player is attempting to enter
+                         // that is above the terrain surface and within typical tree height
+                         // is a "wood-like" block for this collision check.
+                                     
+                                     // Determine collision direction and revert position
+                                     let hitX = false, hitZ = false;
+                                     const posCheckX = oldPosition.clone(); posCheckX.x = cam.position.x;
+                                     if (playerMaxX > blockMinX + COLLISION_TOLERANCE && playerMinX < blockMaxX - COLLISION_TOLERANCE && playerMaxZ > blockMinZ + COLLISION_TOLERANCE && playerMinZ < blockMaxZ - COLLISION_TOLERANCE && posCheckX.distanceToSquared(oldPosition) > 0) hitX = true;
+                                     const posCheckZ = oldPosition.clone(); posCheckZ.z = cam.position.z;
+                                     if (playerMaxX > blockMinX + COLLISION_TOLERANCE && playerMinX < blockMaxX - COLLISION_TOLERANCE && playerMaxZ > blockMinZ + COLLISION_TOLERANCE && playerMinZ < blockMaxZ - COLLISION_TOLERANCE && posCheckZ.distanceToSquared(oldPosition) > 0) hitZ = true;
+                                     if (hitX) cam.position.x = oldPosition.x;
+                                     if (hitZ) cam.position.z = oldPosition.z;
+                                     return; // Found collision with wood, no need to check other instances in this mesh
+                                 }
+                             }
+                         }
+                     });
+                 }
+             });
+            } // End else for stepping up
         }
       }
 
@@ -1036,6 +1139,7 @@ export function BlockExplorerGame() {
       });
       blockGeometry.dispose(); 
       FLOWER_CROSS_GEOMETRY.dispose();
+      TALL_GRASS_CROSS_GEOMETRY.dispose();
       flowerDefinitions.forEach(def => {
           def.material?.map?.dispose(); 
           def.material?.dispose();      

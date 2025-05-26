@@ -9,6 +9,7 @@ import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { Button } from '@/components/ui/button';
 import { Play, HelpCircle, AlertCircle, Mouse } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import MinecraftHeart from '../MinecraftHeart';
 
 // Game Constants
 const BLOCK_SIZE = 1;
@@ -1449,32 +1450,26 @@ export function BlockExplorerGame() {
       {/* Minecraft HUD */}
       {!isPaused && (
         <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
-          {/* Health Bar */}
-          <div className="absolute bottom-16 left-4 flex space-x-1">
-            {[...Array(10)].map((_, i) => (
-              <div
-                key={i}
-                className="w-4 h-4 bg-red-600 relative"
-                style={{
-                  clipPath: 'polygon(50% 0%, 100% 35%, 82% 100%, 18% 100%, 0% 35%)',
-                  filter: 'drop-shadow(1px 1px 0px #000)',
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Food Bar */}
-          <div className="absolute bottom-16 right-4 flex space-x-1">
-            {[...Array(10)].map((_, i) => (
-              <div
-                key={i}
-                className="w-4 h-4 bg-orange-400 relative"
-                style={{
-                  clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)',
-                  filter: 'drop-shadow(1px 1px 0px #000)',
-                }}
-              />
-            ))}
+          {/* Container for Health and Food bars, positioned above and centered with Hotbar */}
+          <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 flex items-end space-x-4">
+            <div className="flex space-x-1">
+              {[...Array(10)].map((_, i) => (
+                <MinecraftHeart key={i} size={16} />
+              ))}
+            </div>
+            {/* Food Bar */}
+            <div className="flex space-x-1">
+              {[...Array(10)].map((_, i) => (
+                <div
+                  key={i}
+                  className="w-4 h-4 bg-orange-400 relative"
+                  style={{
+                    clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)',
+                    filter: 'drop-shadow(1px 1px 0px #000)',
+                  }}
+                />
+              ))}
+            </div>
           </div>
 
           {/* Hotbar */}

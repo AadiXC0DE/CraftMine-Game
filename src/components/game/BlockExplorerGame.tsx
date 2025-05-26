@@ -1,9 +1,8 @@
-
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type * as THREE from 'three'; // Import type for Three.js
-import { PerspectiveCamera, Scene, WebGLRenderer, AmbientLight, DirectionalLight, Clock, Vector3, BoxGeometry, MeshStandardMaterial, InstancedMesh, Matrix4, CanvasTexture, RepeatWrapping, Color, Euler, PlaneGeometry, MeshBasicMaterial, DoubleSide, Group, BufferGeometry, BufferAttribute, Mesh } from 'three';
+import { PerspectiveCamera, Scene, WebGLRenderer, AmbientLight, DirectionalLight, Clock, Vector3, BoxGeometry, MeshStandardMaterial, InstancedMesh, Matrix4, CanvasTexture, RepeatWrapping, Color, Euler, PlaneGeometry, MeshBasicMaterial, DoubleSide, Group, BufferGeometry, BufferAttribute, Mesh, NearestFilter, PCFSoftShadowMap } from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
@@ -44,96 +43,273 @@ const MAX_TERRAIN_HEIGHT_BLOCKS = 35; // Max height of terrain in blocks, increa
 // Flower Constants
 const PLANT_PLANE_DIM = BLOCK_SIZE * 0.7; // Width and height for cross-plane plants (flowers, tall grass)
 const TALL_GRASS_HEIGHT_MULTIPLIER = 1.5; // Tall grass is slightly taller than a block
-const TALL_GRASS_SPAWN_PROBABILITY = 0.01; // Chance to spawn tall grass on a grass block (Less common than flowers)
+const TALL_GRASS_SPAWN_PROBABILITY = 0.03; // Increased chance to spawn tall grass on a grass block
 const TALL_GRASS_MATERIAL_COLOR = '#558B2F'; // Darker green for tall grass
-const FLOWER_SPAWN_PROBABILITY = 0.025; // Chance to spawn a flower on a grass block (Reduced by 75% from 0.1)
+const FLOWER_SPAWN_PROBABILITY = 0.035; // Increased chance to spawn a flower on a grass block
 
 
 // --- Texture Generation ---
 
-function createWoodTexture(): THREE.CanvasTexture {
+function createMinecraftGrassTopTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 64; // Rectangular for better tiling on trunks
+  canvas.width = 16;
+  canvas.height = 16;
   const context = canvas.getContext('2d')!;
 
-  // Base wood color
-  const baseColor = '#A0522D'; // Brown
-  context.fillStyle = baseColor;
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  // Base grass colors - more vibrant Minecraft-like greens
+  const grassColors = [
+    '#7CB518', '#8BC34A', '#689F38', '#7CB342',
+    '#6B9A2D', '#7BA428', '#5D8016', '#6BA52A'
+  ];
 
-  // Wood grain lines
-  const grainColorDark = '#8B4513'; // Darker brown
-  const grainColorLight = '#B97A57'; // Lighter brown
-  context.lineWidth = 1.5;
-  const numLines = 5; // Fewer, more distinct lines
+  // Fill with pixelated grass pattern
+  for (let x = 0; x < 16; x++) {
+    for (let y = 0; y < 16; y++) {
+      const colorIndex = Math.floor(Math.random() * grassColors.length);
+      context.fillStyle = grassColors[colorIndex];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
 
-  for (let i = 0; i < numLines; i++) {
-    const baseX = (canvas.width / (numLines + 0.5)) * (i + 0.5) + (Math.random() - 0.5) * 4; // Add some waviness to base X
-
-    // Darker grain line
-    context.strokeStyle = grainColorDark;
-    context.beginPath();
-    context.moveTo(baseX + (Math.random() - 0.5) * 2, 0); // Random start offset
-    context.lineTo(baseX + (Math.random() - 0.5) * 5, canvas.height); // Random end offset for variation
-    context.stroke();
-
-    // Lighter highlight line
-    context.strokeStyle = grainColorLight;
-    context.beginPath();
-    context.moveTo(baseX + 1.5 + (Math.random() - 0.5) * 2, 0); // Offset from dark line
-    context.lineTo(baseX + 1.5 + (Math.random() - 0.5) * 5, canvas.height);
-    context.stroke();
+  // Add some brighter highlights
+  for (let i = 0; i < 12; i++) {
+    const x = Math.floor(Math.random() * 16);
+    const y = Math.floor(Math.random() * 16);
+    context.fillStyle = '#9CCC65'; // Brighter green highlight
+    context.fillRect(x, y, 1, 1);
   }
 
   const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.needsUpdate = true;
   return texture;
 }
 
-function createLeafTexture(): THREE.CanvasTexture {
+function createMinecraftDirtTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 32;
+  canvas.width = 16;
+  canvas.height = 16;
   const context = canvas.getContext('2d')!;
 
-  const baseLeafColor = '#2E8B57'; // SeaGreen
-  const darkerLeafColor = '#228B22'; // ForestGreen
-  const highlightLeafColor = '#3CB371'; // MediumSeaGreen
+  // Base dirt colors - various shades of brown
+  const dirtColors = [
+    '#8B4513', '#A0522D', '#8B4026', '#7A3F14',
+    '#9B4F1A', '#8A4312', '#7B3E0F', '#964B18'
+  ];
 
-  // Fill base color
-  context.fillStyle = baseLeafColor;
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  // Fill with pixelated dirt pattern
+  for (let x = 0; x < 16; x++) {
+    for (let y = 0; y < 16; y++) {
+      const colorIndex = Math.floor(Math.random() * dirtColors.length);
+      context.fillStyle = dirtColors[colorIndex];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
 
-  // Add splotches for texture
-  const numSplotches = 20;
-  for (let i = 0; i < numSplotches; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 3 + 2; // Vary splotch size
-    context.fillStyle = i % 2 === 0 ? darkerLeafColor : highlightLeafColor; // Alternate colors
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2, true);
-    context.fill();
+  // Add some darker spots for texture
+  for (let i = 0; i < 8; i++) {
+    const x = Math.floor(Math.random() * 16);
+    const y = Math.floor(Math.random() * 16);
+    context.fillStyle = '#5D2F08';
+    context.fillRect(x, y, 1, 1);
   }
-  // Add smaller highlights for more detail
-   const numHighlights = 5;
-   for (let i = 0; i < numHighlights; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 1 + 0.5;
-    context.fillStyle = '#90EE90'; // LightGreen for sharp highlights
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2, true);
-    context.fill();
-  }
+
   const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.needsUpdate = true;
   return texture;
+}
+
+function createMinecraftSandTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 16;
+  const context = canvas.getContext('2d')!;
+
+  // Base sand colors - various shades of tan/yellow
+  const sandColors = [
+    '#F4A460', '#F5DEB3', '#DEB887', '#D2B48C',
+    '#E6D8B8', '#EDD5A3', '#F0E68C', '#DAA520'
+  ];
+
+  // Fill with pixelated sand pattern
+  for (let x = 0; x < 16; x++) {
+    for (let y = 0; y < 16; y++) {
+      const colorIndex = Math.floor(Math.random() * sandColors.length);
+      context.fillStyle = sandColors[colorIndex];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
+
+  // Add some lighter highlights
+  for (let i = 0; i < 6; i++) {
+    const x = Math.floor(Math.random() * 16);
+    const y = Math.floor(Math.random() * 16);
+    context.fillStyle = '#FFF8DC';
+    context.fillRect(x, y, 1, 1);
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createMinecraftWoodTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 16;
+  const context = canvas.getContext('2d')!;
+
+  // Base wood color - much darker oak wood brown
+  const baseColor = '#654321';
+  context.fillStyle = baseColor;
+  context.fillRect(0, 0, 16, 16);
+
+  // Wood grain colors - darker browns to distinguish from dirt
+  const grainColors = ['#5D2F08', '#4A2507', '#3D1E06', '#2F1705'];
+  
+  // Create horizontal wood grain pattern (like Minecraft logs)
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      // Create horizontal lines with some variation
+      if (y % 2 === 0 || y % 3 === 0) {
+        const colorIndex = (x + y) % grainColors.length;
+        context.fillStyle = grainColors[colorIndex];
+        context.fillRect(x, y, 1, 1);
+      }
+      
+      // Add some random darker spots for knots
+      if (Math.random() < 0.02) {
+        context.fillStyle = '#1A0F04';
+        context.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  // Add tree ring pattern (circles from center)
+  const centerX = 8;
+  const centerY = 8;
+  context.fillStyle = '#3D1E06';
+  
+  // Draw concentric rings
+  for (let radius = 2; radius <= 6; radius += 2) {
+    for (let angle = 0; angle < Math.PI * 2; angle += 0.1) {
+      const x = Math.floor(centerX + Math.cos(angle) * radius);
+      const y = Math.floor(centerY + Math.sin(angle) * radius);
+      if (x >= 0 && x < 16 && y >= 0 && y < 16) {
+        context.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createMinecraftLeafTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 16;
+  const context = canvas.getContext('2d')!;
+
+  // Base leaf colors - various shades of green
+  const leafColors = [
+    '#228B22', '#32CD32', '#2E8B57', '#3CB371',
+    '#20B2AA', '#2F4F4F', '#006400', '#008000'
+  ];
+
+  // Fill with pixelated leaf pattern
+  for (let x = 0; x < 16; x++) {
+    for (let y = 0; y < 16; y++) {
+      const colorIndex = Math.floor(Math.random() * leafColors.length);
+      context.fillStyle = leafColors[colorIndex];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
+
+  // Add some transparent spots to make it look less dense
+  for (let i = 0; i < 8; i++) {
+    const x = Math.floor(Math.random() * 16);
+    const y = Math.floor(Math.random() * 16);
+    context.clearRect(x, y, 1, 1);
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createMinecraftWaterTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 16;
+  const context = canvas.getContext('2d')!;
+
+  // Base water colors - Minecraft blue shades
+  const waterColors = [
+    '#3F76E4', '#4285F4', '#2196F3', '#1976D2',
+    '#5294F0', '#4A90E2', '#3B82F6', '#2563EB'
+  ];
+
+  // Fill with pixelated water pattern
+  for (let x = 0; x < 16; x++) {
+    for (let y = 0; y < 16; y++) {
+      const colorIndex = Math.floor(Math.random() * waterColors.length);
+      context.fillStyle = waterColors[colorIndex];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
+
+  // Add flowing water highlights (diagonal patterns)
+  for (let i = 0; i < 8; i++) {
+    const startX = Math.floor(Math.random() * 16);
+    const startY = Math.floor(Math.random() * 16);
+    context.fillStyle = '#87CEEB'; // Light blue highlight
+    
+    // Create diagonal flow lines
+    for (let j = 0; j < 4; j++) {
+      const x = (startX + j) % 16;
+      const y = (startY + j) % 16;
+      context.fillRect(x, y, 1, 1);
+    }
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.magFilter = NearestFilter;
+  texture.minFilter = NearestFilter;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createWoodTexture(): THREE.CanvasTexture {
+  // Use the new Minecraft-style wood texture
+  return createMinecraftWoodTexture();
+}
+
+function createLeafTexture(): THREE.CanvasTexture {
+  // Use the new Minecraft-style leaf texture
+  return createMinecraftLeafTexture();
 }
 
 // Generic flower texture creator
@@ -468,17 +644,35 @@ const TALL_GRASS_CROSS_GEOMETRY = (() => {
 })();
 
 // --- Materials (cached at module level) ---
-const woodTexture = createWoodTexture();
-const leafTexture = createLeafTexture();
+const grassTopTexture = createMinecraftGrassTopTexture();
+const dirtTexture = createMinecraftDirtTexture();
+const sandTexture = createMinecraftSandTexture();
+const woodTexture = createMinecraftWoodTexture();
+const leafTexture = createMinecraftLeafTexture();
+const waterTexture = createMinecraftWaterTexture();
 
 const materials = {
-  grass: new MeshStandardMaterial({ color: 0x70AD47, roughness: 0.8, metalness: 0.1 }),
-  dirt: new MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9, metalness: 0.1 }),
+  grassTop: new MeshStandardMaterial({ map: grassTopTexture, roughness: 0.8, metalness: 0.1 }),
+  dirt: new MeshStandardMaterial({ map: dirtTexture, roughness: 0.9, metalness: 0.1 }),
   wood: new MeshStandardMaterial({ map: woodTexture, roughness: 0.8, metalness: 0.1 }),
-  leaves: new MeshStandardMaterial({ map: leafTexture, roughness: 0.7, metalness: 0.1, alphaTest: 0.1, side: DoubleSide, transparent: true }),
+  leaves: new MeshStandardMaterial({ 
+    map: leafTexture, 
+    roughness: 0.7, 
+    metalness: 0.1, 
+    alphaTest: 0.5, 
+    side: DoubleSide, 
+    transparent: true 
+  }),
   cloud: new MeshBasicMaterial({ color: 0xffffff, side: DoubleSide, transparent: true, opacity: 0.9 }),
-  water: new MeshStandardMaterial({ color: 0x4682B4, opacity: 0.65, transparent: true, roughness: 0.1, metalness: 0.1, side: DoubleSide }),
-  sand: new MeshStandardMaterial({ color: 0xF4A460, roughness: 0.9, metalness: 0.1 }),
+  water: new MeshStandardMaterial({ 
+    map: waterTexture,
+    opacity: 0.7, 
+    transparent: true, 
+    roughness: 0.1, 
+    metalness: 0.1, 
+    side: DoubleSide 
+  }),
+  sand: new MeshStandardMaterial({ map: sandTexture, roughness: 0.9, metalness: 0.1 }),
   tallGrass: new MeshBasicMaterial({ map: createTallGrassTexture(), alphaTest: 0.2, transparent: true, side: DoubleSide }),
 };
 
@@ -505,6 +699,7 @@ export function BlockExplorerGame() {
   const [showHelp, setShowHelp] = useState(true);
   const [pointerLockError, setPointerLockError] = useState<string | null>(null);
   const [isPointerLockUnavailable, setIsPointerLockUnavailable] = useState(false);
+  const [fps, setFps] = useState(0);
 
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -535,6 +730,9 @@ export function BlockExplorerGame() {
   const cloudsGroupRef = useRef<Group | null>(null);
   const sunPositionVecRef = useRef(new Vector3());
 
+  // FPS tracking
+  const fpsCounterRef = useRef(0);
+  const lastFpsUpdateRef = useRef(0);
 
   const generateChunk = useCallback((chunkX: number, chunkZ: number): ChunkData | null => {
     if (!noiseRef.current) return null;
@@ -596,7 +794,27 @@ export function BlockExplorerGame() {
             const plantType = Math.random();
             const plantTopSurfaceY = chunkTerrainHeights[x][z]; // This is the center Y of the highest block
 
-            if (plantType < TALL_GRASS_SPAWN_PROBABILITY) {
+            // Calculate abundance multiplier based on terrain height (more grass on hills)
+            const terrainHeightBlocks = Math.floor(plantTopSurfaceY / BLOCK_SIZE) + 1;
+            let abundanceMultiplier = 1.0;
+            
+            // More vegetation on higher terrain (hills and mountains)
+            if (terrainHeightBlocks > 8) {
+              abundanceMultiplier = 1.8; // 80% more vegetation on hills
+            } else if (terrainHeightBlocks > 5) {
+              abundanceMultiplier = 1.4; // 40% more vegetation on elevated areas
+            }
+            
+            // Create grass patches - areas with higher grass density
+            const patchNoise = noise.noise(globalNoiseX / 8, globalNoiseZ / 8, 1.5);
+            if (patchNoise > 0.3) {
+              abundanceMultiplier *= 2.2; // Much denser grass in patches
+            }
+
+            const adjustedTallGrassProb = TALL_GRASS_SPAWN_PROBABILITY * abundanceMultiplier;
+            const adjustedFlowerProb = FLOWER_SPAWN_PROBABILITY * abundanceMultiplier;
+
+            if (plantType < adjustedTallGrassProb) {
                  // Spawn Tall Grass
                 const tallGrassCenterY = plantTopSurfaceY - (BLOCK_SIZE / 2) + (PLANT_PLANE_DIM * TALL_GRASS_HEIGHT_MULTIPLIER / 2);
                 const tallGrassMatrix = new Matrix4().setPosition(
@@ -607,7 +825,7 @@ export function BlockExplorerGame() {
                 tallGrassMatrix.multiply(new Matrix4().makeRotationY(Math.random() * Math.PI * 2)); // Random rotation
                 blockInstances['tallGrass'].push(tallGrassMatrix);
 
-            } else if (plantType < TALL_GRASS_SPAWN_PROBABILITY + FLOWER_SPAWN_PROBABILITY) {
+            } else if (plantType < adjustedTallGrassProb + adjustedFlowerProb) {
                  // Spawn a random Flower
                 const randomFlowerDef = flowerDefinitions[Math.floor(Math.random() * flowerDefinitions.length)];
                 const flowerCenterY = plantTopSurfaceY - (BLOCK_SIZE / 2) + (PLANT_PLANE_DIM / 2); // Flower plane is smaller
@@ -717,9 +935,12 @@ export function BlockExplorerGame() {
         } else if (type === 'grass') {
           currentMaterial = [
             materials.dirt, materials.dirt, 
-            materials.grass, materials.dirt, 
+            materials.grassTop, materials.dirt, 
             materials.dirt, materials.dirt  
           ];
+        } else if (type === 'leaves') {
+          currentMaterial = materials[type as keyof typeof materials];
+          castShadow = false; // Disable shadow casting for leaves to fix glitchy shadows
         } else {
           currentMaterial = materials[type as keyof typeof materials];
         }
@@ -867,7 +1088,7 @@ export function BlockExplorerGame() {
     const renderer = new WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = PerspectiveCamera.PCFSoftShadowMap; 
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = PCFSoftShadowMap; 
     currentMount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -888,13 +1109,16 @@ export function BlockExplorerGame() {
     sky.scale.setScalar(SKY_RADIUS); 
     scene.add(sky);
     const skyUniforms = sky.material.uniforms;
-    skyUniforms['turbidity'].value = 10; skyUniforms['rayleigh'].value = 2;
-    skyUniforms['mieCoefficient'].value = 0.005; skyUniforms['mieDirectionalG'].value = 0.8;
+    skyUniforms['turbidity'].value = 1; // Much clearer sky like Minecraft
+    skyUniforms['rayleigh'].value = 0.5; // Reduced atmospheric scattering
+    skyUniforms['mieCoefficient'].value = 0.005; 
+    skyUniforms['mieDirectionalG'].value = 0.8;
     
-    sunPositionVecRef.current.setFromSphericalCoords(1, Math.PI / 2 - 0.45, Math.PI * 0.35); 
+    // Position sun more directly overhead like Minecraft
+    sunPositionVecRef.current.setFromSphericalCoords(1, Math.PI / 2 - 0.2, Math.PI * 0.25); 
     skyUniforms['sunPosition'].value.copy(sunPositionVecRef.current);
-    sunLight.position.copy(sunPositionVecRef.current.clone().multiplyScalar(150)); 
-    sunLight.target.position.set(0,0,0); 
+    sunLight.position.copy(sunPositionVecRef.current.clone().multiplyScalar(200)); // Higher sun position
+    sunLight.target.position.set(0,0,0);
 
     const sunGeometry = new PlaneGeometry(SUN_SIZE, SUN_SIZE);
     const sunMaterial = new MeshBasicMaterial({ color: 0xFFFBC1, side: DoubleSide, fog: false }); 
@@ -966,7 +1190,16 @@ export function BlockExplorerGame() {
       animationFrameId = requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      updateChunks(); 
+      // FPS tracking
+      fpsCounterRef.current++;
+      const currentTime = performance.now();
+      if (currentTime - lastFpsUpdateRef.current >= 1000) {
+        setFps(fpsCounterRef.current);
+        fpsCounterRef.current = 0;
+        lastFpsUpdateRef.current = currentTime;
+      }
+
+      updateChunks();
 
       if (cloudsGroupRef.current && cameraRef.current) {
           cloudsGroupRef.current.position.x = cameraRef.current.position.x; 
@@ -1115,8 +1348,13 @@ export function BlockExplorerGame() {
       rendererRef.current?.dispose();
       sky?.material.dispose(); 
       
+      // Dispose of all textures
+      grassTopTexture.dispose();
+      dirtTexture.dispose();
+      sandTexture.dispose();
       woodTexture.dispose();
       leafTexture.dispose();
+      waterTexture.dispose();
       
       if (sunMeshRef.current) {
         sunMeshRef.current.geometry.dispose();
@@ -1135,7 +1373,7 @@ export function BlockExplorerGame() {
 
       Object.values(materials).forEach(mat => {
         if (Array.isArray(mat)) { mat.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });} 
-        else { if (mat.map && mat.map !== woodTexture && mat.map !== leafTexture) mat.map.dispose(); mat.dispose(); }
+        else { if (mat.map) mat.map.dispose(); mat.dispose(); }
       });
       blockGeometry.dispose(); 
       FLOWER_CROSS_GEOMETRY.dispose();
@@ -1201,6 +1439,88 @@ export function BlockExplorerGame() {
 
   return (
     <div ref={mountRef} className="h-full w-full relative">
+      {/* FPS Counter */}
+      {!isPaused && (
+        <div className="absolute top-4 right-4 z-20 bg-black/50 text-white px-2 py-1 rounded text-sm font-mono">
+          {fps} FPS
+        </div>
+      )}
+
+      {/* Minecraft HUD */}
+      {!isPaused && (
+        <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
+          {/* Health Bar */}
+          <div className="absolute bottom-16 left-4 flex space-x-1">
+            {[...Array(10)].map((_, i) => (
+              <div
+                key={i}
+                className="w-4 h-4 bg-red-600 relative"
+                style={{
+                  clipPath: 'polygon(50% 0%, 100% 35%, 82% 100%, 18% 100%, 0% 35%)',
+                  filter: 'drop-shadow(1px 1px 0px #000)',
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Food Bar */}
+          <div className="absolute bottom-16 right-4 flex space-x-1">
+            {[...Array(10)].map((_, i) => (
+              <div
+                key={i}
+                className="w-4 h-4 bg-orange-400 relative"
+                style={{
+                  clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)',
+                  filter: 'drop-shadow(1px 1px 0px #000)',
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Hotbar */}
+          <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2">
+            <div className="flex bg-gray-800/80 p-1 rounded border-2 border-gray-600">
+              {[...Array(9)].map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-10 h-10 border-2 ${
+                    i === 0 ? 'border-white bg-gray-700/50' : 'border-gray-500 bg-gray-800/50'
+                  } mx-0.5 relative`}
+                >
+                  {/* Slot number */}
+                  <span className="absolute -top-4 left-1/2 transform -translate-x-1/2 text-white text-xs font-bold">
+                    {i + 1}
+                  </span>
+                  
+                  {/* Mock items for first few slots */}
+                  {i === 0 && (
+                    <div className="w-8 h-8 m-0.5 bg-amber-700" style={{
+                      background: 'linear-gradient(45deg, #8B4513 25%, #A0522D 25%, #A0522D 50%, #8B4513 50%, #8B4513 75%, #A0522D 75%)',
+                      backgroundSize: '4px 4px',
+                      imageRendering: 'pixelated'
+                    }} />
+                  )}
+                  {i === 1 && (
+                    <div className="w-8 h-8 m-0.5 bg-stone-500" style={{
+                      background: 'linear-gradient(45deg, #6B7280 25%, #9CA3AF 25%, #9CA3AF 50%, #6B7280 50%, #6B7280 75%, #9CA3AF 75%)',
+                      backgroundSize: '4px 4px',
+                      imageRendering: 'pixelated'
+                    }} />
+                  )}
+                  {i === 2 && (
+                    <div className="w-8 h-8 m-0.5 bg-green-600" style={{
+                      background: 'linear-gradient(45deg, #16A34A 25%, #22C55E 25%, #22C55E 50%, #16A34A 50%, #16A34A 75%, #22C55E 75%)',
+                      backgroundSize: '4px 4px',
+                      imageRendering: 'pixelated'
+                    }} />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {isPaused && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-10 p-4">
           {isPointerLockUnavailable ? ( 

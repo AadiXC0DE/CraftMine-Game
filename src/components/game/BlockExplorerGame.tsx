@@ -718,6 +718,8 @@ export function BlockExplorerGame() {
   const moveRight = useRef(false);
   const canJump = useRef(false);
 
+  const isRunningRef = useRef(false);
+
   const loadedChunksRef = useRef<Map<string, ChunkData>>(new Map());
   const currentChunkCoordsRef = useRef({ x: 0, z: 0 });
   const noiseRef = useRef(new ImprovedNoise());
@@ -1167,6 +1169,7 @@ export function BlockExplorerGame() {
              startGame();
            }
           break;
+        case 'ShiftLeft': case 'ShiftRight': isRunningRef.current = true; break;
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -1175,6 +1178,7 @@ export function BlockExplorerGame() {
         case 'ArrowLeft': case 'KeyA': moveLeft.current = false; break;
         case 'ArrowDown': case 'KeyS': moveBackward.current = false; break;
         case 'ArrowRight': case 'KeyD': moveRight.current = false; break;
+        case 'ShiftLeft': case 'ShiftRight': isRunningRef.current = false; break;
       }
     };
     document.addEventListener('keydown', onKeyDown); document.addEventListener('keyup', onKeyUp);
@@ -1233,7 +1237,16 @@ export function BlockExplorerGame() {
           onGround.current = false;
         }
 
-        const moveSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.9) * delta; 
+        // Determine base speed based on ground contact
+        let baseSpeed = PLAYER_SPEED * (onGround.current ? 1 : 0.9);
+
+        // Increase speed if running (Shift + Forward)
+        if (isRunningRef.current && moveForward.current) {
+            baseSpeed *= 1.75; // Sprinting speed multiplier (adjust as needed)
+        }
+
+        const moveSpeed = baseSpeed * delta;
+        
         const moveDirection = new Vector3();
         const forwardVector = new Vector3();
         cam.getWorldDirection(forwardVector);
@@ -1252,7 +1265,7 @@ export function BlockExplorerGame() {
             cam.position.addScaledVector(moveDirection, moveSpeed);
 
             const playerFeetAbsY = cam.position.y - PLAYER_HEIGHT + (BLOCK_SIZE / 2); 
-            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE; 
+            const playerHeadAbsY = cam.position.y + (BLOCK_SIZE / 2) - COLLISION_TOLERANCE;
 
             const targetBlockWorldX = cam.position.x;
             const targetBlockWorldZ = cam.position.z;

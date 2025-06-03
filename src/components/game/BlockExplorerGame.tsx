@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Play, HelpCircle, AlertCircle, Mouse } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import MinecraftHeart from '../MinecraftHeart';
+import Crosshair from './Crosshair';
+import { BlockBreakingSystem } from '@/lib/blockBreaking';
+import { initializeBlockIdentification } from '@/lib/blockIdentification';
 
 // Game Constants
 const BLOCK_SIZE = 1;
@@ -701,6 +704,14 @@ export function BlockExplorerGame() {
   const [pointerLockError, setPointerLockError] = useState<string | null>(null);
   const [isPointerLockUnavailable, setIsPointerLockUnavailable] = useState(false);
   const [fps, setFps] = useState(0);
+  
+  // Block breaking state
+  const [isTargeting, setIsTargeting] = useState(false);
+  const [breakProgress, setBreakProgress] = useState(0);
+  const [currentTool, setCurrentTool] = useState('hand');
+  
+  // Inventory state
+  const [inventory, setInventory] = useState<Record<string, number>>({});
 
   const isPausedRef = useRef(isPaused);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -709,6 +720,9 @@ export function BlockExplorerGame() {
   const cameraRef = useRef<PerspectiveCamera | null>(null);
   const rendererRef = useRef<WebGLRenderer | null>(null);
   const controlsRef = useRef<PointerLockControls | null>(null);
+  
+  // Block breaking system ref
+  const blockBreakingSystemRef = useRef<BlockBreakingSystem | null>(null);
 
   const playerVelocity = useRef(new Vector3());
   const onGround = useRef(false);
@@ -717,6 +731,10 @@ export function BlockExplorerGame() {
   const moveLeft = useRef(false);
   const moveRight = useRef(false);
   const canJump = useRef(false);
+  
+  // Block breaking input state
+  const isBreaking = useRef(false);
+  const lastTargetedBlock = useRef<string | null>(null);
 
   const isRunningRef = useRef(false);
 
@@ -1152,6 +1170,119 @@ export function BlockExplorerGame() {
     const controls = new PointerLockControls(camera, renderer.domElement);
     controlsRef.current = controls; scene.add(controls.getObject()); 
 
+    // Initialize block breaking system
+    blockBreakingSystemRef.current = new BlockBreakingSystem(scene, camera, (chunkKey, oldMesh, newMesh) => {
+      // Update chunk data when blocks are removed
+      const chunkData = loadedChunksRef.current.get(chunkKey);
+      if (chunkData) {
+        // Find and replace the old mesh with the new one in the chunk's mesh array
+        const meshIndex = chunkData.meshes.findIndex(mesh => mesh === oldMesh);
+        if (meshIndex !== -1) {
+          if (newMesh) {
+            chunkData.meshes[meshIndex] = newMesh;
+          } else {
+            // Remove the mesh entirely
+            chunkData.meshes.splice(meshIndex, 1);
+          }
+          console.log(`Updated chunk ${chunkKey} mesh array`);
+        }
+        
+        // Update terrain heights for removed surface blocks
+        // We need to recalculate terrain heights by finding the highest remaining block at each position
+        const [chunkX, chunkZ] = chunkKey.split(',').map(Number);
+        
+        // Recalculate terrain heights for this chunk
+        for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
+          for (let localZ = 0; localZ < CHUNK_DEPTH; localZ++) {
+            const worldX = (chunkX * CHUNK_WIDTH + localX) * BLOCK_SIZE;
+            const worldZ = (chunkZ * CHUNK_DEPTH + localZ) * BLOCK_SIZE;
+            
+            let maxHeight = -Infinity;
+            
+            // Check all remaining meshes to find the highest block at this position
+            chunkData.meshes.forEach(mesh => {
+              const tempMatrix = new Matrix4();
+              const tempVector = new Vector3();
+              
+              for (let i = 0; i < mesh.count; i++) {
+                mesh.getMatrixAt(i, tempMatrix);
+                tempVector.setFromMatrixPosition(tempMatrix);
+                
+                // Check if this block is at the same X,Z position
+                if (Math.abs(tempVector.x - worldX) < BLOCK_SIZE / 2 && 
+                    Math.abs(tempVector.z - worldZ) < BLOCK_SIZE / 2) {
+                  maxHeight = Math.max(maxHeight, tempVector.y);
+                }
+              }
+            });
+            
+            // Update terrain height (or set to very low if no blocks found)
+            if (maxHeight === -Infinity) {
+              chunkData.terrainHeights[localX][localZ] = -1000; // Far below ground
+            } else {
+              chunkData.terrainHeights[localX][localZ] = maxHeight;
+            }
+          }
+        }
+        
+        console.log(`Updated terrain heights for chunk ${chunkKey}`);
+      }
+    }, getPlayerGroundHeight, (blockType) => {
+      // Handle item collection - update inventory
+      setInventory(prev => ({
+        ...prev,
+        [blockType]: (prev[blockType] || 0) + 1
+      }));
+    }); // Pass the ground height function and inventory callback
+    
+    // Initialize block identification with materials
+    initializeBlockIdentification(materials);
+
+    // Mouse event handlers for block breaking
+    const onMouseDown = (event: MouseEvent) => {
+      if (isPausedRef.current || event.button !== 0) return; // Only left mouse button
+      isBreaking.current = true;
+      
+      if (blockBreakingSystemRef.current && !isPausedRef.current) {
+        const raycastResult = blockBreakingSystemRef.current.raycastBlock(
+          loadedChunksRef.current, 
+          BLOCK_SIZE, 
+          CHUNK_WIDTH, 
+          CHUNK_DEPTH
+        );
+        
+        if (raycastResult.hit && raycastResult.position) {
+          const success = blockBreakingSystemRef.current.startBreaking(raycastResult, currentTool);
+          if (success) {
+            setIsTargeting(true);
+            // Create consistent block key using rounded coordinates
+            const blockKey = `${Math.round(raycastResult.position.x / BLOCK_SIZE)},${Math.round(raycastResult.position.y / BLOCK_SIZE)},${Math.round(raycastResult.position.z / BLOCK_SIZE)}`;
+            lastTargetedBlock.current = blockKey;
+          } else {
+            setIsTargeting(false);
+            setBreakProgress(0);
+          }
+        }
+      }
+    };
+
+    const onMouseUp = (event: MouseEvent) => {
+      if (event.button !== 0) return; // Only left mouse button
+      isBreaking.current = false;
+      
+      if (blockBreakingSystemRef.current) {
+        blockBreakingSystemRef.current.stopBreaking();
+      }
+      
+      setIsTargeting(false);
+      setBreakProgress(0);
+      lastTargetedBlock.current = null;
+    };
+
+    // Add mouse event listeners
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mouseup', onMouseUp);
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (isPausedRef.current && event.code !== 'Escape') return; 
       switch (event.code) {
@@ -1170,6 +1301,11 @@ export function BlockExplorerGame() {
            }
           break;
         case 'ShiftLeft': case 'ShiftRight': isRunningRef.current = true; break;
+        // Tool selection keys (1-4 for different tools)
+        case 'Digit1': setCurrentTool('hand'); break;
+        case 'Digit2': setCurrentTool('pickaxe'); break;
+        case 'Digit3': setCurrentTool('axe'); break;
+        case 'Digit4': setCurrentTool('shovel'); break;
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -1219,6 +1355,59 @@ export function BlockExplorerGame() {
           });
       }
 
+      // Update block breaking system
+      if (blockBreakingSystemRef.current && !isPausedRef.current) {
+        // Check if we're still targeting the same block
+        if (isBreaking.current) {
+          const raycastResult = blockBreakingSystemRef.current.raycastBlock(
+            loadedChunksRef.current, 
+            BLOCK_SIZE, 
+            CHUNK_WIDTH, 
+            CHUNK_DEPTH
+          );
+          
+          if (raycastResult.hit && raycastResult.position) {
+            // Create a consistent block key using rounded coordinates
+            const blockKey = `${Math.round(raycastResult.position.x / BLOCK_SIZE)},${Math.round(raycastResult.position.y / BLOCK_SIZE)},${Math.round(raycastResult.position.z / BLOCK_SIZE)}`;
+            
+            // If we're targeting a different block, stop current breaking and start new
+            if (lastTargetedBlock.current !== blockKey) {
+              blockBreakingSystemRef.current.stopBreaking();
+              const success = blockBreakingSystemRef.current.startBreaking(raycastResult, currentTool);
+              if (success) {
+                lastTargetedBlock.current = blockKey;
+                setIsTargeting(true);
+              } else {
+                setIsTargeting(false);
+                setBreakProgress(0);
+                lastTargetedBlock.current = null;
+              }
+            }
+          } else {
+            // No block targeted, stop breaking
+            blockBreakingSystemRef.current.stopBreaking();
+            setIsTargeting(false);
+            setBreakProgress(0);
+            lastTargetedBlock.current = null;
+          }
+        }
+        
+        // Update breaking progress
+        const completedBlock = blockBreakingSystemRef.current.updateBreaking(delta);
+        if (completedBlock) {
+          // Block was broken
+          setIsTargeting(false);
+          setBreakProgress(0);
+          lastTargetedBlock.current = null;
+          console.log(`Broke ${completedBlock.blockType} block at`, completedBlock.position);
+        } else {
+          // Update progress for UI
+          const currentBreaking = blockBreakingSystemRef.current.getCurrentBreaking();
+          if (currentBreaking) {
+            setBreakProgress(currentBreaking.progress);
+          }
+        }
+      }
 
       if (cameraRef.current && sceneRef.current && (!isPausedRef.current || isUsingFallbackControlsRef.current)) {
         const cam = cameraRef.current;
@@ -1354,10 +1543,21 @@ export function BlockExplorerGame() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      document.removeEventListener('keydown', onKeyDown); document.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('keydown', onKeyDown); 
+      document.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('resize', handleResize);
-      controlsRef.current?.removeEventListener('lock', onControlsLock); controlsRef.current?.removeEventListener('unlock', onControlsUnlock);
+      controlsRef.current?.removeEventListener('lock', onControlsLock); 
+      controlsRef.current?.removeEventListener('unlock', onControlsUnlock);
       controlsRef.current?.disconnect(); 
+      
+      // Cleanup block breaking system
+      if (blockBreakingSystemRef.current) {
+        blockBreakingSystemRef.current.dispose();
+        blockBreakingSystemRef.current = null;
+      }
+      
       if (currentMount && rendererRef.current?.domElement) currentMount.removeChild(rendererRef.current.domElement);
       rendererRef.current?.dispose();
       sky?.material.dispose(); 
@@ -1453,10 +1653,44 @@ export function BlockExplorerGame() {
 
   return (
     <div ref={mountRef} className="h-full w-full relative">
+      {/* Crosshair */}
+      {!isPaused && (
+        <Crosshair 
+          isTargeting={isTargeting} 
+          breakProgress={breakProgress} 
+        />
+      )}
+
       {/* FPS Counter */}
       {!isPaused && (
         <div className="absolute top-4 right-4 z-20 bg-black/50 text-white px-2 py-1 rounded text-sm font-mono">
           {fps} FPS
+        </div>
+      )}
+
+      {/* Tool Indicator */}
+      {!isPaused && (
+        <div className="absolute top-4 left-4 z-20 bg-black/50 text-white px-3 py-2 rounded">
+          <div className="text-sm font-bold mb-1">Current Tool:</div>
+          <div className="text-lg capitalize">{currentTool}</div>
+          <div className="text-xs mt-1 opacity-75">
+            Press 1-4 to switch tools
+          </div>
+        </div>
+      )}
+
+      {/* Inventory Display */}
+      {!isPaused && Object.keys(inventory).length > 0 && (
+        <div className="absolute top-4 right-16 z-20 bg-black/70 text-white px-3 py-2 rounded">
+          <div className="text-sm font-bold mb-2">Inventory:</div>
+          <div className="space-y-1">
+            {Object.entries(inventory).map(([blockType, count]) => (
+              <div key={blockType} className="flex justify-between items-center text-xs">
+                <span className="capitalize">{blockType}:</span>
+                <span className="ml-2 font-bold">{count}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1562,10 +1796,18 @@ export function BlockExplorerGame() {
                   <CardHeader><CardTitle className="flex items-center text-card-foreground"><HelpCircle className="mr-2 h-6 w-6 text-accent" /> How to Play</CardTitle></CardHeader>
                   <CardContent className="text-card-foreground/90">
                     <ul className="list-disc list-inside space-y-1">
-                      <li><strong>Move:</strong> WASD or Arrow Keys</li><li><strong>Look:</strong> Mouse (after clicking start)</li>
-                      <li><strong>Jump:</strong> Spacebar</li><li><strong>Pause/Unpause:</strong> ESC key</li>
+                      <li><strong>Move:</strong> WASD or Arrow Keys</li>
+                      <li><strong>Look:</strong> Mouse (after clicking start)</li>
+                      <li><strong>Jump:</strong> Spacebar</li>
+                      <li><strong>Run:</strong> Hold Shift + W</li>
+                      <li><strong>Break Blocks:</strong> Left Click & Hold</li>
+                      <li><strong>Tools:</strong> Press 1-4 (Hand, Pickaxe, Axe, Shovel)</li>
+                      <li><strong>Pause/Unpause:</strong> ESC key</li>
                     </ul>
                     <p className="mt-3 text-sm">Click "{showHelp ? buttonTextStart : buttonTextResume}" to lock mouse pointer and begin.</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Different tools break different blocks faster - use the right tool for the job!
+                    </p>
                   </CardContent>
                 </Card>
               )}

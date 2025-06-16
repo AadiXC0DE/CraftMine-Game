@@ -15,7 +15,6 @@ CraftMine is a web-based recreation of the popular game Minecraft, built using J
 
 - **Frontend**: React, Next.js, Tailwind CSS
 - **Backend**: Node.js (if applicable)
-- **Database**: (Specify if you're using any database)
 - **Other Libraries**: (List any other libraries or frameworks used)
 
 ## Installation

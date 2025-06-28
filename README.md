@@ -41,7 +41,3 @@ To get started with CraftMine, follow these steps:
 ## Usage
 
 Once the server is running, open your browser and navigate to `http://localhost:3000` to start playing CraftMine.
-
-## Acknowledgments
-
-- Inspired by the original Minecraft game.
